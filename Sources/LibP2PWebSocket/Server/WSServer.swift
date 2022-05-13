@@ -13,6 +13,7 @@ import NIOExtras
 import Logging
 
 public final class WSServer: Server {
+    public static var key:String = "WS"
     
     /// Engine server config struct.
     ///
@@ -21,7 +22,7 @@ public final class WSServer: Server {
     ///
     public struct Configuration {
         public static let defaultHostname = "127.0.0.1"
-        public static let defaultPort = 10000
+        public static let defaultPort = 10001
         
         /// Address the server will bind to. Configuring an address using a hostname with a nil host or port will use the default hostname or port respectively.
         public var address: BindAddress
