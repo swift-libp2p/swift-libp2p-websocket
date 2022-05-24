@@ -96,6 +96,7 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// - Note: Outbound Go WebSockets don't work. Not sure why.
     /// - Note: I think it's either a timing issue (it has worked a couple times in the past)
     func testWebSocketSwiftClientGoHost() throws {
+        if String(cString: getenv("SkipIntegrationTests")) == "true" { print("Skipping Integration Test"); return }
         let client = Application(.testing)
         client.servers.use(.ws(host: "192.168.1.3", port: 10001))
         client.security.use(.noise)
@@ -145,6 +146,7 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// ```
     /// - Note: Inbound Go WebSockets work
     func testWebSocketSwiftHostGoClient() throws {
+        if String(cString: getenv("SkipIntegrationTests")) == "true" { print("Skipping Integration Test"); return }
         let host = Application(.testing)
         host.servers.use(.ws(host: "192.168.1.3", port: 10000))
         host.security.use(.noise)
@@ -204,6 +206,7 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// ```
     /// - Note: Unlike GO, JS does not delimit their messages with a newLine char
     func testWebSocketSwiftClientJSHost() throws {
+        if String(cString: getenv("SkipIntegrationTests")) == "true" { print("Skipping Integration Test"); return }
         let client = Application(.testing)
         client.servers.use(.ws(host: "127.0.0.1", port: 10000))
         client.security.use(.noise)
@@ -258,6 +261,7 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// - Note: This test requires the custom PeerID due to JS echo example using static keypairs and expecting them in the handshake
     /// - Note: Unlike GO, JS does not delimit their messages with a newLine char
     func testWebSocketSwiftHostJSClient() throws {
+        if String(cString: getenv("SkipIntegrationTests")) == "true" { print("Skipping Integration Test"); return }
         let str = """
         {
           "id": "QmcrQZ6RJdpYuGvZqD5QEHAv6qX4BrQLJLQPQUrTrzdcgm",
