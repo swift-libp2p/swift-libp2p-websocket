@@ -8,7 +8,6 @@
 import LibP2P
 import NIOHTTP1
 import NIOWebSocket
-import LibP2PCrypto
 
 // Install our WS Tranport on the LibP2P Application
 public struct WebSocket: Transport {
