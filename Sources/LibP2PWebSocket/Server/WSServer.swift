@@ -15,6 +15,11 @@ import Logging
 public final class WSServer: Server {
     public static var key:String = "WS"
     
+    public enum Errors:Error {
+        case invalidRemoteAddress
+        case lostReferenceToApplication
+    }
+    
     /// Engine server config struct.
     ///
     ///     let serverConfig = WSServer.Configuration.default(port: 8123)
@@ -271,7 +276,9 @@ private final class WSServerConnection {
             
             // Set the handlers that are applied to the accepted Channels
             .childChannelInitializer { [weak application] channel in
-                let conn = BasicConnectionLight(application: application!, channel: channel, direction: .inbound, remoteAddress: try! channel.remoteAddress!.toMultiaddr(), expectedRemotePeer: nil)
+                guard let application = application else { return channel.eventLoop.makeFailedFuture(WSServer.Errors.lostReferenceToApplication) }
+                guard let remoteAddress = try? channel.remoteAddress?.toMultiaddr().encapsulate(proto: .ws, address: nil) else { return channel.eventLoop.makeFailedFuture(WSServer.Errors.invalidRemoteAddress) }
+                let conn = application.connectionManager.generateConnection(channel: channel, direction: .inbound, remoteAddress: remoteAddress, expectedRemotePeer: nil)
                 
                 let upgrader = NIOWebSocketServerUpgrader(
                     shouldUpgrade: { (channel: Channel, head: HTTPRequestHead) in
@@ -301,7 +308,7 @@ private final class WSServerConnection {
                             )
                 
                 /// Add the new inbound conneciton to our ConnectionManager
-                return application!.connections.addConnection(conn, on: nil).flatMap {
+                return application.connections.addConnection(conn, on: nil).flatMap {
                     return channel.pipeline.configureHTTPServerPipeline(withServerUpgrade: config).flatMap {
                         channel.pipeline.addHandler(httpHandler)
                     }

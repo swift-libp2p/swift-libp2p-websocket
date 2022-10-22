@@ -81,8 +81,7 @@ public struct WebSocket: Transport {
         return sharedClient.connect(host: tcp.address, port: tcp.port).flatMap { channel -> EventLoopFuture<Connection> in
             
             self.application.logger.trace("Instantiating new Connection")
-            let conn = BasicConnectionLight(
-                application: application,
+            let conn = application.connectionManager.generateConnection(
                 channel: channel,
                 direction: .outbound,
                 remoteAddress: address,
