@@ -36,7 +36,7 @@ final class LibP2PWebSocketTests: XCTestCase {
         client.transports.use(.ws)
         client.logger.logLevel = .trace
 
-        host.routes.on("echo", "1.0.0", handlers: [.newLineDelimited]) { req -> ResponseType<ByteBuffer> in
+        host.routes.on("echo", "1.0.0", handlers: [.newLineDelimited]) { req -> Response<ByteBuffer> in
             switch req.event {
             case .ready: return .stayOpen
             case .data(let data): return .respondThenClose(data)
@@ -74,9 +74,61 @@ final class LibP2PWebSocketTests: XCTestCase {
         
         waitForExpectations(timeout: 5)
         
+        usleep(350_000)
+        
+        print("🔀🔀🔀 Connections Between Peers 🔀🔀🔀")
+        try? client.connections.getConnectionsToPeer(peer: host.peerID, on: nil).wait().forEach {
+            print($0)
+        }
+        try? host.connections.getConnectionsToPeer(peer: client.peerID, on: nil).wait().forEach {
+            print($0)
+        }
+        print("----------------------------------------")
+        
+        sleep(1)
+        
         client.shutdown()
         host.shutdown()
     }
+    
+    func testExternalSwiftHostSameLAN() throws {
+        if String(cString: getenv("SkipIntegrationTests")) == "true" { print("Skipping Integration Test"); return }
+        let client = Application(.testing)
+        client.servers.use(.tcp(host: "0.0.0.0", port: 10000))
+        client.security.use(.noise)
+        client.muxers.use(.mplex)
+        //client.transports.use(.ws)
+        client.logger.logLevel = .trace
+
+        XCTAssertNoThrow(try client.start())
+                
+        let hostAddress = try Multiaddr("/ip4/192.168.1.44/tcp/10000/p2p/12D3KooWQekqjrkfVMP8aC2rExb3VQiuGJ4YGtq4gt5SsRMsmrdw")
+        
+        XCTAssertEqual(client.listenAddresses.first, try! Multiaddr("/ip4/0.0.0.0/tcp/10000"))
+        
+        let echoResponseExpectation = expectation(description: "Echo Response Expectation")
+                
+        let echoMessage = "Hello from swift libp2p!"
+        client.newRequest(to: hostAddress, forProtocol: "/echo/1.0.0", withRequest: Data(echoMessage.utf8), withHandlers: .handlers([.newLineDelimited]), withTimeout: .seconds(2)).whenComplete { result in
+            switch result {
+            case .failure(let error):
+                XCTFail("\(error)")
+            case .success(let response):
+                guard let str = String(data: Data(response), encoding: .utf8) else {
+                    XCTFail("Failed to decode response data")
+                    break
+                }
+                print(str)
+                XCTAssertEqual(str, "Hello from swift libp2p!")
+            }
+            echoResponseExpectation.fulfill()
+        }
+        
+        waitForExpectations(timeout: 3)
+        
+        client.shutdown()
+    }
+    
     
     /// **************************************
     ///    Testing Go Host WS Interoperability
@@ -98,7 +150,7 @@ final class LibP2PWebSocketTests: XCTestCase {
     func testWebSocketSwiftClientGoHost() throws {
         if String(cString: getenv("SkipIntegrationTests")) == "true" { print("Skipping Integration Test"); return }
         let client = Application(.testing)
-        client.servers.use(.ws(host: "192.168.1.3", port: 10001))
+        client.servers.use(.ws(host: "0.0.0.0", port: 10000))
         client.security.use(.noise)
         client.muxers.use(.mplex)
         client.transports.use(.ws)
@@ -106,9 +158,9 @@ final class LibP2PWebSocketTests: XCTestCase {
 
         XCTAssertNoThrow(try client.start())
                 
-        let hostAddress = try Multiaddr("/ip4/192.168.1.23/tcp/10000/ws/p2p/Qmc8L1snbTaNEDnT2fM325N9XvUoUiD4vAsYgJeRfaqoyx")
+        let hostAddress = try Multiaddr("/ip4/127.0.0.1/tcp/10001/ws/p2p/QmVdiowCX42i1PeFpo2eadzHHMwa1Dn1VBCr4egQrj2XDm")
         
-        XCTAssertEqual(client.listenAddresses.first, try! Multiaddr("/ip4/192.168.1.3/tcp/10001/ws"))
+        //XCTAssertEqual(client.listenAddresses.first, try! Multiaddr("/ip4/0.0.0.0/tcp/10000/ws"))
         
         let echoResponseExpectation = expectation(description: "Echo Response Expectation")
                 
@@ -156,9 +208,9 @@ final class LibP2PWebSocketTests: XCTestCase {
         print("Swift Libp2p host listening on: \(host.listenAddresses.map { try! $0.encapsulate(proto: .p2p, address: host.peerID.b58String) })")
         
         let echoResponseExpectation = expectation(description: "Echo Response Expectation")
-        let expectedMessages:Int = 5
+        let expectedMessages:Int = 1
         var echoedMessages:[String] = []
-        host.routes.on("echo", "1.0.0", handlers: [.newLineDelimited]) { req -> ResponseType<ByteBuffer> in
+        host.routes.on("echo", "1.0.0", handlers: [.newLineDelimited]) { req -> Response<ByteBuffer> in
             print("/echo/1.0.0 request -> \(req)")
             switch req.event {
             case .ready:
@@ -282,7 +334,7 @@ final class LibP2PWebSocketTests: XCTestCase {
         let echoResponseExpectation = expectation(description: "Echo Response Expectation")
         
         var echoedMessages:[String] = []
-        host.routes.on("echo", "1.0.0") { req -> ResponseType<ByteBuffer> in
+        host.routes.on("echo", "1.0.0") { req -> Response<ByteBuffer> in
             print("/echo/1.0.0 request -> \(req)")
             switch req.event {
             case .ready:
