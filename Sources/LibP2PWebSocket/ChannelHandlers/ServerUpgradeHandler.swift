@@ -1,9 +1,16 @@
+//===----------------------------------------------------------------------===//
 //
-//  ServerUpgradeHandler.swift
-//  
+// This source file is part of the swift-libp2p open source project
 //
-//  Created by Brandon Toms on 5/10/22.
+// Copyright (c) 2022-2025 swift-libp2p project authors
+// Licensed under MIT
 //
+// See LICENSE for license information
+// See CONTRIBUTORS for the list of swift-libp2p project authors
+//
+// SPDX-License-Identifier: MIT
+//
+//===----------------------------------------------------------------------===//
 
 import LibP2P
 import NIOHTTP1
@@ -41,9 +48,11 @@ internal final class ServerUpgradeHandler: ChannelInboundHandler, RemovableChann
         headers.add(name: "Content-Type", value: "text/html")
         headers.add(name: "Content-Length", value: String(self.responseBody.readableBytes))
         headers.add(name: "Connection", value: "close")
-        let responseHead = HTTPResponseHead(version: .init(major: 1, minor: 1),
-                                    status: .ok,
-                                    headers: headers)
+        let responseHead = HTTPResponseHead(
+            version: .init(major: 1, minor: 1),
+            status: .ok,
+            headers: headers
+        )
         context.write(self.wrapOutboundOut(.head(responseHead)), promise: nil)
         context.write(self.wrapOutboundOut(.body(.byteBuffer(self.responseBody))), promise: nil)
         context.write(self.wrapOutboundOut(.end(nil))).whenComplete { (_: Result<Void, Error>) in
@@ -56,9 +65,11 @@ internal final class ServerUpgradeHandler: ChannelInboundHandler, RemovableChann
         var headers = HTTPHeaders()
         headers.add(name: "Connection", value: "close")
         headers.add(name: "Content-Length", value: "0")
-        let head = HTTPResponseHead(version: .http1_1,
-                                    status: .methodNotAllowed,
-                                    headers: headers)
+        let head = HTTPResponseHead(
+            version: .http1_1,
+            status: .methodNotAllowed,
+            headers: headers
+        )
         context.write(self.wrapOutboundOut(.head(head)), promise: nil)
         context.write(self.wrapOutboundOut(.end(nil))).whenComplete { (_: Result<Void, Error>) in
             context.close(promise: nil)

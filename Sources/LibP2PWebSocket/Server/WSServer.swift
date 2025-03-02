@@ -1,25 +1,32 @@
+//===----------------------------------------------------------------------===//
 //
-//  WSServer.swift
-//  
+// This source file is part of the swift-libp2p open source project
 //
-//  Created by Brandon Toms on 5/10/22.
+// Copyright (c) 2022-2025 swift-libp2p project authors
+// Licensed under MIT
 //
+// See LICENSE for license information
+// See CONTRIBUTORS for the list of swift-libp2p project authors
+//
+// SPDX-License-Identifier: MIT
+//
+//===----------------------------------------------------------------------===//
 
 import LibP2P
+import Logging
 import NIO
+import NIOExtras
 import NIOHTTP1
 import NIOWebSocket
-import NIOExtras
-import Logging
 
 public final class WSServer: Server {
-    public static var key:String = "WS"
-    
-    public enum Errors:Error {
+    public static var key: String = "WS"
+
+    public enum Errors: Error {
         case invalidRemoteAddress
         case lostReferenceToApplication
     }
-    
+
     /// Engine server config struct.
     ///
     ///     let serverConfig = WSServer.Configuration.default(port: 8123)
@@ -28,10 +35,10 @@ public final class WSServer: Server {
     public struct Configuration {
         public static let defaultHostname = "127.0.0.1"
         public static let defaultPort = 10001
-        
+
         /// Address the server will bind to. Configuring an address using a hostname with a nil host or port will use the default hostname or port respectively.
         public var address: BindAddress
-        
+
         /// Host name the server will bind to.
         public var hostname: String {
             get {
@@ -51,41 +58,41 @@ public final class WSServer: Server {
                 }
             }
         }
-        
+
         /// Port the server will bind to.
         public var port: Int {
-           get {
-               switch address {
-               case .hostname(_, let port):
-                   return port ?? Self.defaultPort
-               default:
-                   return Self.defaultPort
-               }
-           }
-           set {
-               switch address {
-               case .hostname(let hostname, _):
-                   address = .hostname(hostname, port: newValue)
-               default:
-                   address = .hostname(nil, port: newValue)
-               }
-           }
-       }
-        
+            get {
+                switch address {
+                case .hostname(_, let port):
+                    return port ?? Self.defaultPort
+                default:
+                    return Self.defaultPort
+                }
+            }
+            set {
+                switch address {
+                case .hostname(let hostname, _):
+                    address = .hostname(hostname, port: newValue)
+                default:
+                    address = .hostname(nil, port: newValue)
+                }
+            }
+        }
+
         /// Listen backlog.
         public var backlog: Int
-        
+
         /// When `true`, can prevent errors re-binding to a socket after successive server restarts.
         public var reuseAddress: Bool
-        
+
         /// When `true`, OS will attempt to minimize TCP packet delay.
         public var tcpNoDelay: Bool
-        
+
         //public var tlsConfiguration: TLSConfiguration?
-        
+
         /// If set, this name will be serialized as the `Server` header in outgoing responses.
         public var serverName: String?
-        
+
         /// Any uncaught server or responder errors will go here.
         public var logger: Logger
 
@@ -98,11 +105,11 @@ public final class WSServer: Server {
             backlog: Int = 256,
             reuseAddress: Bool = true,
             tcpNoDelay: Bool = true,
-//            responseCompression: CompressionConfiguration = .disabled,
-//            requestDecompression: DecompressionConfiguration = .disabled,
-//            supportPipelining: Bool = true,
-//            supportVersions: Set<HTTPVersionMajor>? = nil,
-//            tlsConfiguration: TLSConfiguration? = nil,
+            //            responseCompression: CompressionConfiguration = .disabled,
+            //            requestDecompression: DecompressionConfiguration = .disabled,
+            //            supportPipelining: Bool = true,
+            //            supportVersions: Set<HTTPVersionMajor>? = nil,
+            //            tlsConfiguration: TLSConfiguration? = nil,
             serverName: String? = nil,
             logger: Logger? = nil,
             shutdownTimeout: TimeAmount = .seconds(10)
@@ -112,27 +119,27 @@ public final class WSServer: Server {
                 backlog: backlog,
                 reuseAddress: reuseAddress,
                 tcpNoDelay: tcpNoDelay,
-//                responseCompression: responseCompression,
-//                requestDecompression: requestDecompression,
-//                supportPipelining: supportPipelining,
-//                supportVersions: supportVersions,
-//                tlsConfiguration: tlsConfiguration,
+                //                responseCompression: responseCompression,
+                //                requestDecompression: requestDecompression,
+                //                supportPipelining: supportPipelining,
+                //                supportVersions: supportVersions,
+                //                tlsConfiguration: tlsConfiguration,
                 serverName: serverName,
                 logger: logger,
                 shutdownTimeout: shutdownTimeout
             )
         }
-        
+
         public init(
             address: BindAddress,
             backlog: Int = 256,
             reuseAddress: Bool = true,
             tcpNoDelay: Bool = true,
-//            responseCompression: CompressionConfiguration = .disabled,
-//            requestDecompression: DecompressionConfiguration = .disabled,
-//            supportPipelining: Bool = true,
-//            supportVersions: Set<HTTPVersionMajor>? = nil,
-//            tlsConfiguration: TLSConfiguration? = nil,
+            //            responseCompression: CompressionConfiguration = .disabled,
+            //            requestDecompression: DecompressionConfiguration = .disabled,
+            //            supportPipelining: Bool = true,
+            //            supportVersions: Set<HTTPVersionMajor>? = nil,
+            //            tlsConfiguration: TLSConfiguration? = nil,
             serverName: String? = nil,
             logger: Logger? = nil,
             shutdownTimeout: TimeAmount = .seconds(10)
@@ -141,21 +148,21 @@ public final class WSServer: Server {
             self.backlog = backlog
             self.reuseAddress = reuseAddress
             self.tcpNoDelay = tcpNoDelay
-//            self.responseCompression = responseCompression
-//            self.requestDecompression = requestDecompression
-//            self.supportPipelining = supportPipelining
-//            if let supportVersions = supportVersions {
-//                self.supportVersions = supportVersions
-//            } else {
-//                self.supportVersions = tlsConfiguration == nil ? [.one] : [.one, .two]
-//            }
-//            self.tlsConfiguration = tlsConfiguration
+            //            self.responseCompression = responseCompression
+            //            self.requestDecompression = requestDecompression
+            //            self.supportPipelining = supportPipelining
+            //            if let supportVersions = supportVersions {
+            //                self.supportVersions = supportVersions
+            //            } else {
+            //                self.supportVersions = tlsConfiguration == nil ? [.one] : [.one, .two]
+            //            }
+            //            self.tlsConfiguration = tlsConfiguration
             self.serverName = serverName
             self.logger = logger ?? Logger(label: "swift.libp2p.ws-server")
             self.shutdownTimeout = shutdownTimeout
         }
     }
-    
+
     public var onShutdown: EventLoopFuture<Void> {
         guard let connection = self.connection else {
             fatalError("Server has not started yet")
@@ -166,13 +173,13 @@ public final class WSServer: Server {
     private let responder: Responder
     private let configuration: Configuration
     private let eventLoopGroup: EventLoopGroup
-    
+
     private var connection: WSServerConnection?
     private var didShutdown: Bool
     private var didStart: Bool
 
     private var application: Application
-    
+
     init(
         application: Application,
         responder: Responder,
@@ -186,19 +193,19 @@ public final class WSServer: Server {
         self.didStart = false
         self.didShutdown = false
     }
-    
+
     public func start(address: BindAddress?) throws {
         var configuration = self.configuration
-        
+
         switch address {
-        case .none: // use the configuration as is
+        case .none:  // use the configuration as is
             break
-        case .hostname(let hostname, let port): // override the hostname, port, neither, or both
+        case .hostname(let hostname, let port):  // override the hostname, port, neither, or both
             configuration.address = .hostname(hostname ?? configuration.hostname, port: port ?? configuration.port)
-        case .unixDomainSocket: // override the socket path
+        case .unixDomainSocket:  // override the socket path
             configuration.address = address!
         }
-        
+
         // print starting message
         //let scheme = configuration.tlsConfiguration == nil ? "http" : "https"
         let addressDescription: String
@@ -208,7 +215,7 @@ public final class WSServer: Server {
         case .unixDomainSocket(let socketPath):
             addressDescription = "unix: \(socketPath)"
         }
-        
+
         self.configuration.logger.notice("WS Server starting on \(addressDescription)")
 
         // start the actual TCPServer
@@ -221,7 +228,7 @@ public final class WSServer: Server {
 
         self.didStart = true
     }
-    
+
     public func shutdown() {
         guard let connection = self.connection else {
             return
@@ -237,9 +244,9 @@ public final class WSServer: Server {
     }
 
     public var localAddress: SocketAddress? {
-        return self.connection?.channel.localAddress
+        self.connection?.channel.localAddress
     }
-    
+
     /// TODO: FIXME!
     public var listeningAddress: Multiaddr {
         guard didStart else {
@@ -247,7 +254,7 @@ public final class WSServer: Server {
         }
         return try! self.localAddress!.toMultiaddr().encapsulate(proto: .ws, address: nil)
     }
-    
+
     deinit {
         assert(!self.didStart || self.didShutdown, "WSServer did not shutdown before deinitializing")
     }
@@ -256,7 +263,7 @@ public final class WSServer: Server {
 private final class WSServerConnection {
     let channel: Channel
     let quiesce: ServerQuiescingHelper
-    
+
     static func start(
         application: Application,
         responder: Responder,
@@ -267,19 +274,31 @@ private final class WSServerConnection {
         let bootstrap = ServerBootstrap(group: eventLoopGroup)
             // Specify backlog and enable SO_REUSEADDR for the server itself
             .serverChannelOption(ChannelOptions.backlog, value: Int32(configuration.backlog))
-            .serverChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: configuration.reuseAddress ? SocketOptionValue(1) : SocketOptionValue(0))
-            
+            .serverChannelOption(
+                ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR),
+                value: configuration.reuseAddress ? SocketOptionValue(1) : SocketOptionValue(0)
+            )
+
             // Set handlers that are applied to the Server's channel
             .serverChannelInitializer { channel in
                 channel.pipeline.addHandler(quiesce.makeServerChannelHandler(channel: channel))
             }
-            
+
             // Set the handlers that are applied to the accepted Channels
             .childChannelInitializer { [weak application] channel in
-                guard let application = application else { return channel.eventLoop.makeFailedFuture(WSServer.Errors.lostReferenceToApplication) }
-                guard let remoteAddress = try? channel.remoteAddress?.toMultiaddr().encapsulate(proto: .ws, address: nil) else { return channel.eventLoop.makeFailedFuture(WSServer.Errors.invalidRemoteAddress) }
-                let conn = application.connectionManager.generateConnection(channel: channel, direction: .inbound, remoteAddress: remoteAddress, expectedRemotePeer: nil)
-                
+                guard let application = application else {
+                    return channel.eventLoop.makeFailedFuture(WSServer.Errors.lostReferenceToApplication)
+                }
+                guard
+                    let remoteAddress = try? channel.remoteAddress?.toMultiaddr().encapsulate(proto: .ws, address: nil)
+                else { return channel.eventLoop.makeFailedFuture(WSServer.Errors.invalidRemoteAddress) }
+                let conn = application.connectionManager.generateConnection(
+                    channel: channel,
+                    direction: .inbound,
+                    remoteAddress: remoteAddress,
+                    expectedRemotePeer: nil
+                )
+
                 let upgrader = NIOWebSocketServerUpgrader(
                     shouldUpgrade: { (channel: Channel, head: HTTPRequestHead) in
                         channel.eventLoop.makeSucceededFuture(HTTPHeaders())
@@ -287,10 +306,10 @@ private final class WSServerConnection {
                     upgradePipelineHandler: { (channel: Channel, _: HTTPRequestHead) in
                         let wsh = WebSocketDuplexHandler(mode: .listener, logger: conn.logger)
                         return channel.pipeline.addHandler(BackPressureHandler(), position: .first).flatMap {
-                            return channel.pipeline.addHandler(wsh, position: .last).flatMap {
+                            channel.pipeline.addHandler(wsh, position: .last).flatMap {
                                 //self.logger.trace("WebSocket Server attempting to initialize connection")
                                 /// Initialize the new inbound channel
-                                return conn.initializeChannel().map {
+                                conn.initializeChannel().map {
                                     //self.logger.info("Calling onNewInboundConnection")
                                     wsh.fireChannelActiveIfNecessary()
                                 }
@@ -298,28 +317,34 @@ private final class WSServerConnection {
                         }
                     }
                 )
-                
+
                 let httpHandler = ServerUpgradeHandler()
                 let config: NIOHTTPServerUpgradeConfiguration = (
-                                upgraders: [ upgrader ],
-                                completionHandler: { _ in
-                                    channel.pipeline.removeHandler(httpHandler, promise: nil)
-                                }
-                            )
-                
+                    upgraders: [upgrader],
+                    completionHandler: { _ in
+                        channel.pipeline.removeHandler(httpHandler, promise: nil)
+                    }
+                )
+
                 /// Add the new inbound conneciton to our ConnectionManager
                 return application.connections.addConnection(conn, on: nil).flatMap {
-                    return channel.pipeline.configureHTTPServerPipeline(withServerUpgrade: config).flatMap {
+                    channel.pipeline.configureHTTPServerPipeline(withServerUpgrade: config).flatMap {
                         channel.pipeline.addHandler(httpHandler)
                     }
                 }
             }
-            
+
             // Enable TCP_NODELAY and SO_REUSEADDR for the accepted Channels
-            .childChannelOption(ChannelOptions.socket(IPPROTO_TCP, TCP_NODELAY), value: configuration.tcpNoDelay ? SocketOptionValue(1) : SocketOptionValue(0))
-            .childChannelOption(ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR), value: configuration.reuseAddress ? SocketOptionValue(1) : SocketOptionValue(0))
+            .childChannelOption(
+                ChannelOptions.socket(IPPROTO_TCP, TCP_NODELAY),
+                value: configuration.tcpNoDelay ? SocketOptionValue(1) : SocketOptionValue(0)
+            )
+            .childChannelOption(
+                ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR),
+                value: configuration.reuseAddress ? SocketOptionValue(1) : SocketOptionValue(0)
+            )
             .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 1)
-        
+
         let channel: EventLoopFuture<Channel>
         switch configuration.address {
         case .hostname:
@@ -327,20 +352,20 @@ private final class WSServerConnection {
         case .unixDomainSocket(let socketPath):
             channel = bootstrap.bind(unixDomainSocketPath: socketPath)
         }
-        
+
         return channel.map { channel in
-            return .init(channel: channel, quiesce: quiesce)
+            .init(channel: channel, quiesce: quiesce)
         }.flatMapErrorThrowing { error -> WSServerConnection in
             quiesce.initiateShutdown(promise: nil)
             throw error
         }
     }
-    
+
     init(channel: Channel, quiesce: ServerQuiescingHelper) {
         self.channel = channel
         self.quiesce = quiesce
     }
-    
+
     func close(timeout: TimeAmount) -> EventLoopFuture<Void> {
         let promise = self.channel.eventLoop.makePromise(of: Void.self)
         self.channel.eventLoop.scheduleTask(in: timeout) {
@@ -350,16 +375,16 @@ private final class WSServerConnection {
         self.quiesce.initiateShutdown(promise: promise)
         return promise.futureResult
     }
-    
+
     var onClose: EventLoopFuture<Void> {
         self.channel.closeFuture
     }
-    
+
     deinit {
         assert(!self.channel.isActive, "WSServerConnection deinitialized without calling shutdown()")
     }
-    
-    public enum Errors:Error {
+
+    public enum Errors: Error {
         case serverStopTookTooLong
     }
 }
@@ -367,11 +392,11 @@ private final class WSServerConnection {
 final class WSServerErrorHandler: ChannelInboundHandler {
     typealias InboundIn = Never
     let logger: Logger
-    
+
     init(logger: Logger) {
         self.logger = logger
     }
-    
+
     func errorCaught(context: ChannelHandlerContext, error: Error) {
         self.logger.error("Unhandled WS server error: \(error)")
         context.close(mode: .output, promise: nil)
@@ -388,4 +413,3 @@ final class WSServerErrorHandler: ChannelInboundHandler {
 //      ...
 //    }
 //}
-
