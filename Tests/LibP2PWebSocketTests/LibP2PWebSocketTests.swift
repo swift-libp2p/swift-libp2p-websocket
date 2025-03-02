@@ -113,7 +113,7 @@ final class LibP2PWebSocketTests: XCTestCase {
     }
 
     func testExternalSwiftHostSameLAN() throws {
-        if String(cString: getenv("SkipIntegrationTests")) == "true" {
+        guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
             print("Skipping Integration Test")
             return
         }
@@ -179,7 +179,7 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// - Note: Outbound Go WebSockets don't work. Not sure why.
     /// - Note: I think it's either a timing issue (it has worked a couple times in the past)
     func testWebSocketSwiftClientGoHost() throws {
-        if String(cString: getenv("SkipIntegrationTests")) == "true" {
+        guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
             print("Skipping Integration Test")
             return
         }
@@ -240,7 +240,7 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// ```
     /// - Note: Inbound Go WebSockets work
     func testWebSocketSwiftHostGoClient() throws {
-        if String(cString: getenv("SkipIntegrationTests")) == "true" {
+        guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
             print("Skipping Integration Test")
             return
         }
@@ -307,7 +307,7 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// ```
     /// - Note: Unlike GO, JS does not delimit their messages with a newLine char
     func testWebSocketSwiftClientJSHost() throws {
-        if String(cString: getenv("SkipIntegrationTests")) == "true" {
+        guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
             print("Skipping Integration Test")
             return
         }
@@ -368,7 +368,7 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// - Note: This test requires the custom PeerID due to JS echo example using static keypairs and expecting them in the handshake
     /// - Note: Unlike GO, JS does not delimit their messages with a newLine char
     func testWebSocketSwiftHostJSClient() throws {
-        if String(cString: getenv("SkipIntegrationTests")) == "true" {
+        guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
             print("Skipping Integration Test")
             return
         }
