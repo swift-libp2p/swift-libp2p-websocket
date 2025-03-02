@@ -12,7 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-import LibP2P
+@preconcurrency import LibP2P
 import NIOHTTP1
 import NIOWebSocket
 
@@ -112,11 +112,11 @@ public struct WebSocket: Transport {
                     print(head)
                     let wsh = WebSocketDuplexHandler(mode: .initiator, logger: conn.logger)
                     return channel.pipeline.addHandler(BackPressureHandler(), position: .first).flatMap {
-                        return channel.pipeline.addHandler(wsh, position: .last).flatMap {
+                        channel.pipeline.addHandler(wsh, position: .last).flatMap {
                             /// Add the connection to our connectionManager
                             //return self.application.connections.addConnection(conn, on: nil).flatMap {
                             /// Tell our connection to initialize the channel
-                            return conn.initializeChannel().map {
+                            conn.initializeChannel().map {
                                 wsh.fireChannelActiveIfNecessary()
                             }
                             //}
@@ -151,8 +151,10 @@ public struct WebSocket: Transport {
         //address.tcpAddress != nil && !address.protocols().contains(.ws)
         print("WS Can Dial -> \(address)")
         guard let tcp = address.tcpAddress else { return false }
-        guard tcp.ip4 else { return false }  // Remove once we can dial ipv6 addresses
-        guard address.protocols().contains(.ws) else { return false }  // We should only dial WS multiaddr // || ma.protocols().contains(.wss))
+        // Remove once we can dial ipv6 addresses
+        guard tcp.ip4 else { return false }
+        // We should only dial WS multiaddr // || ma.protocols().contains(.wss))
+        guard address.protocols().contains(.ws) else { return false }
         return true
     }
 

@@ -306,10 +306,10 @@ private final class WSServerConnection {
                     upgradePipelineHandler: { (channel: Channel, _: HTTPRequestHead) in
                         let wsh = WebSocketDuplexHandler(mode: .listener, logger: conn.logger)
                         return channel.pipeline.addHandler(BackPressureHandler(), position: .first).flatMap {
-                            return channel.pipeline.addHandler(wsh, position: .last).flatMap {
+                            channel.pipeline.addHandler(wsh, position: .last).flatMap {
                                 //self.logger.trace("WebSocket Server attempting to initialize connection")
                                 /// Initialize the new inbound channel
-                                return conn.initializeChannel().map {
+                                conn.initializeChannel().map {
                                     //self.logger.info("Calling onNewInboundConnection")
                                     wsh.fireChannelActiveIfNecessary()
                                 }
@@ -328,7 +328,7 @@ private final class WSServerConnection {
 
                 /// Add the new inbound conneciton to our ConnectionManager
                 return application.connections.addConnection(conn, on: nil).flatMap {
-                    return channel.pipeline.configureHTTPServerPipeline(withServerUpgrade: config).flatMap {
+                    channel.pipeline.configureHTTPServerPipeline(withServerUpgrade: config).flatMap {
                         channel.pipeline.addHandler(httpHandler)
                     }
                 }
