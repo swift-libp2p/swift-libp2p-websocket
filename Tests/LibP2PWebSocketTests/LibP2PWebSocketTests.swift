@@ -93,16 +93,37 @@ final class LibP2PWebSocketTests: XCTestCase {
             echoResponseExpectation.fulfill()
         }
 
+        usleep(50_000)
+
+        // After 50ms we should have some active connections to between our peers
+        print("🔀🔀🔀 Connections Between Peers 🔀🔀🔀")
+        let clientConnections = (try? client.connections.getConnectionsToPeer(peer: host.peerID, on: nil).wait()) ?? []
+        XCTAssertGreaterThan(clientConnections.count, 0)
+        for connection in clientConnections {
+            print(connection)
+        }
+        let hostConnections = (try? host.connections.getConnectionsToPeer(peer: client.peerID, on: nil).wait()) ?? []
+        XCTAssertGreaterThan(hostConnections.count, 0)
+        for connection in hostConnections {
+            print(connection)
+        }
+        print("----------------------------------------")
+
         waitForExpectations(timeout: 5)
 
-        usleep(350_000)
+        usleep(500_000)
 
+        // After 500ms of inactivity our connections between our peers should be pruned
         print("🔀🔀🔀 Connections Between Peers 🔀🔀🔀")
-        try? client.connections.getConnectionsToPeer(peer: host.peerID, on: nil).wait().forEach {
-            print($0)
+        let clientConnections2 = (try? client.connections.getConnectionsToPeer(peer: host.peerID, on: nil).wait()) ?? []
+        XCTAssertEqual(clientConnections2.count, 0)
+        for connection in clientConnections2 {
+            print(connection)
         }
-        try? host.connections.getConnectionsToPeer(peer: client.peerID, on: nil).wait().forEach {
-            print($0)
+        let hostConnections2 = (try? host.connections.getConnectionsToPeer(peer: client.peerID, on: nil).wait()) ?? []
+        XCTAssertEqual(hostConnections2.count, 0)
+        for connection in hostConnections2 {
+            print(connection)
         }
         print("----------------------------------------")
 
