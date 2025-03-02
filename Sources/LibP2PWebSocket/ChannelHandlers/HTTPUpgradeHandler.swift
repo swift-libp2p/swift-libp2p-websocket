@@ -24,20 +24,20 @@ internal final class HTTPInitialRequestHandler: ChannelInboundHandler, Removable
     public typealias OutboundOut = HTTPClientRequestPart
 
     public let target: Multiaddr
-    private var logger:Logger
-    
-    public init(target: Multiaddr, logger:Logger) {
-        self.logger = logger //Logger(label: "Transport:WS[\(logger)]:InitialRequest")
+    private var logger: Logger
+
+    public init(target: Multiaddr, logger: Logger) {
+        self.logger = logger  //Logger(label: "Transport:WS[\(logger)]:InitialRequest")
         self.target = target
         self.logger[metadataKey: "WS"] = .string("UpgradeHandler")
     }
-    
+
     public func channelActive(context: ChannelHandlerContext) {
         self.logger.trace("WS HTTP Client connected to \(context.remoteAddress!)")
 
         // We are connected. It's time to send the message to the server to initialize the upgrade dance.
         var headers = HTTPHeaders()
-        guard let ipAddy = target.tcpAddress else  {
+        guard let ipAddy = target.tcpAddress else {
             self.logger.error("Failed to extract Target Address for Header Host parameter")
             context.close(mode: .all, promise: nil)
             return
@@ -49,26 +49,28 @@ internal final class HTTPInitialRequestHandler: ChannelInboundHandler, Removable
         //headers.add(name: "Access-Control-Allow-Origin", value: "*")
         //headers.add(name: "Connection", value: "upgrade")
         //headers.add(name: "Upgrade", value: "websocket")
-        
-        let requestHead = HTTPRequestHead(version: .http1_1,
-                                          method: .GET,
-                                          uri: "/",
-                                          headers: headers)
-        
+
+        let requestHead = HTTPRequestHead(
+            version: .http1_1,
+            method: .GET,
+            uri: "/",
+            headers: headers
+        )
+
         context.write(self.wrapOutboundOut(.head(requestHead)), promise: nil)
-        
+
         let body = HTTPClientRequestPart.body(.byteBuffer(ByteBuffer()))
         context.write(self.wrapOutboundOut(body), promise: nil)
-        
+
         context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
     }
-    
+
     public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        
+
         let clientResponse = self.unwrapInboundIn(data)
-        
+
         self.logger.error("Upgrade failed")
-        
+
         switch clientResponse {
         case .head(let responseHead):
             self.logger.error("Received status: \(responseHead.status)")
@@ -81,14 +83,14 @@ internal final class HTTPInitialRequestHandler: ChannelInboundHandler, Removable
             context.close(promise: nil)
         }
     }
-    
+
     public func handlerRemoved(context: ChannelHandlerContext) {
         self.logger.trace("handler removed.")
     }
-    
+
     public func errorCaught(context: ChannelHandlerContext, error: Error) {
         self.logger.error("\(error)")
-        
+
         // As we are not really interested getting notified on success or failure
         // we just pass nil as promise to reduce allocations.
         context.close(promise: nil)
