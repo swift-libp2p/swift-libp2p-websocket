@@ -93,7 +93,7 @@ public struct WebSocket: Transport {
                 channel: channel,
                 direction: .outbound,
                 remoteAddress: address,
-                expectedRemotePeer: try? PeerID(cid: address.getPeerID() ?? "")
+                expectedRemotePeer: try? address.getPeerID()
             )
 
             /// The connection installs the necessary channel handlers here
