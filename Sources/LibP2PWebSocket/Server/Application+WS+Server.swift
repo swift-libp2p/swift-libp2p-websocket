@@ -51,8 +51,8 @@ extension Application.WS {
                 )
                 self.application.storage[Key.self] = new
                 // Add lifecycle handler.
-                //self.application.logger.trace("Initialized TCP Server, hooking into lifecycle handler")
-                //sself.application.lifecycle.use(new)
+                //self.application.logger.trace("Initialized WS Server, hooking into lifecycle handler")
+                //self.application.lifecycle.use(new)
                 return new
             }
         }
