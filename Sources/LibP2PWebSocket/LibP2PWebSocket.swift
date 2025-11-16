@@ -12,18 +12,35 @@
 //
 //===----------------------------------------------------------------------===//
 
-@preconcurrency import LibP2P
+import LibP2P
+import NIOConcurrencyHelpers
 import NIOHTTP1
 import NIOWebSocket
 
 // Install our WS Tranport on the LibP2P Application
 public struct WebSocket: Transport {
-    public static var key: String = "websockets"
+    public static let key: String = "websockets"
 
     let application: Application
-    public var protocols: [LibP2PProtocol]
-    public var proxy: Bool
+
+    public var protocols: [LibP2PProtocol] {
+        get { _protocols.withLockedValue { $0 } }
+    }
+    public let _protocols: NIOLockedValueBox<[LibP2PProtocol]>
+
+    public var proxy: Bool {
+        get { _proxy.withLockedValue { $0 } }
+    }
+    public let _proxy: NIOLockedValueBox<Bool>
+
     public let uuid: UUID
+
+    init(application: Application, protocols: [LibP2PProtocol], proxy: Bool, uuid: UUID) {
+        self.application = application
+        self._protocols = .init(protocols)
+        self._proxy = .init(proxy)
+        self.uuid = uuid
+    }
 
     public var sharedClient: ClientBootstrap {
         let lock = self.application.locks.lock(for: Key.self)

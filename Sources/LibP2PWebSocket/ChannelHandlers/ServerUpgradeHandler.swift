@@ -13,13 +13,18 @@
 //===----------------------------------------------------------------------===//
 
 import LibP2P
+import NIOConcurrencyHelpers
 import NIOHTTP1
 
-internal final class ServerUpgradeHandler: ChannelInboundHandler, RemovableChannelHandler {
+internal final class ServerUpgradeHandler: ChannelInboundHandler, RemovableChannelHandler, Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
 
-    private var responseBody: ByteBuffer!
+    private var responseBody: ByteBuffer? {
+        get { _responseBody.withLockedValue { $0 } }
+        set { _responseBody.withLockedValue { $0 = newValue } }
+    }
+    private let _responseBody: NIOLockedValueBox<ByteBuffer?> = .init(nil)
 
     func handlerAdded(context: ChannelHandlerContext) {
         self.responseBody = context.channel.allocator.buffer(string: "")
@@ -46,7 +51,7 @@ internal final class ServerUpgradeHandler: ChannelInboundHandler, RemovableChann
 
         var headers = HTTPHeaders()
         headers.add(name: "Content-Type", value: "text/html")
-        headers.add(name: "Content-Length", value: String(self.responseBody.readableBytes))
+        headers.add(name: "Content-Length", value: String(self.responseBody!.readableBytes))
         headers.add(name: "Connection", value: "close")
         let responseHead = HTTPResponseHead(
             version: .init(major: 1, minor: 1),
@@ -54,7 +59,7 @@ internal final class ServerUpgradeHandler: ChannelInboundHandler, RemovableChann
             headers: headers
         )
         context.write(self.wrapOutboundOut(.head(responseHead)), promise: nil)
-        context.write(self.wrapOutboundOut(.body(.byteBuffer(self.responseBody))), promise: nil)
+        context.write(self.wrapOutboundOut(.body(.byteBuffer(self.responseBody!))), promise: nil)
         context.write(self.wrapOutboundOut(.end(nil))).whenComplete { (_: Result<Void, Error>) in
             context.close(promise: nil)
         }

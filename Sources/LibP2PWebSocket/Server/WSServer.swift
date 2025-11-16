@@ -15,12 +15,13 @@
 import LibP2P
 import Logging
 import NIO
+import NIOConcurrencyHelpers
 import NIOExtras
 import NIOHTTP1
 import NIOWebSocket
 
 public final class WSServer: Server {
-    public static var key: String = "WS"
+    public static let key: String = "WS"
 
     public enum Errors: Error {
         case invalidRemoteAddress
@@ -32,12 +33,16 @@ public final class WSServer: Server {
     ///     let serverConfig = WSServer.Configuration.default(port: 8123)
     ///     services.register(serverConfig)
     ///
-    public struct Configuration {
+    public struct Configuration: Sendable {
         public static let defaultHostname = "127.0.0.1"
         public static let defaultPort = 10001
 
         /// Address the server will bind to. Configuring an address using a hostname with a nil host or port will use the default hostname or port respectively.
-        public var address: BindAddress
+        public var address: BindAddress {
+            get { _address.withLockedValue { $0 } }
+            set { _address.withLockedValue { $0 = newValue } }
+        }
+        private let _address: NIOLockedValueBox<BindAddress>
 
         /// Host name the server will bind to.
         public var hostname: String {
@@ -144,7 +149,7 @@ public final class WSServer: Server {
             logger: Logger? = nil,
             shutdownTimeout: TimeAmount = .seconds(10)
         ) {
-            self.address = address
+            self._address = .init(address)
             self.backlog = backlog
             self.reuseAddress = reuseAddress
             self.tcpNoDelay = tcpNoDelay
@@ -174,11 +179,25 @@ public final class WSServer: Server {
     private let configuration: Configuration
     private let eventLoopGroup: EventLoopGroup
 
-    private var connection: WSServerConnection?
-    private var didShutdown: Bool
-    private var didStart: Bool
+    private var connection: WSServerConnection? {
+        get { _connection.withLockedValue { $0 } }
+        set { _connection.withLockedValue { $0 = newValue } }
+    }
+    private let _connection: NIOLockedValueBox<WSServerConnection?>
 
-    private var application: Application
+    private var didShutdown: Bool {
+        get { _didShutdown.withLockedValue { $0 } }
+        set { _didShutdown.withLockedValue { $0 = newValue } }
+    }
+    private let _didShutdown: NIOLockedValueBox<Bool>
+
+    private var didStart: Bool {
+        get { _didStart.withLockedValue { $0 } }
+        set { _didStart.withLockedValue { $0 = newValue } }
+    }
+    private let _didStart: NIOLockedValueBox<Bool>
+
+    private let application: Application
 
     init(
         application: Application,
@@ -190,8 +209,9 @@ public final class WSServer: Server {
         self.responder = responder
         self.configuration = configuration
         self.eventLoopGroup = eventLoopGroup
-        self.didStart = false
-        self.didShutdown = false
+        self._didStart = .init(false)
+        self._didShutdown = .init(false)
+        self._connection = .init(nil)
     }
 
     public func start(address: BindAddress?) throws {
@@ -260,7 +280,7 @@ public final class WSServer: Server {
     }
 }
 
-private final class WSServerConnection {
+private final class WSServerConnection: Sendable {
     let channel: Channel
     let quiesce: ServerQuiescingHelper
 
