@@ -15,29 +15,30 @@
 import LibP2P
 import LibP2PMPLEX
 import LibP2PNoise
-import XCTest
+import Testing
 
 @testable import LibP2PWebSocket
 
-final class LibP2PWebSocketTests: XCTestCase {
+@Suite("Libp2p WebSocket Tests", .serialized)
+struct LibP2PWebSocketTests {
 
-    func testInternalWebSocketStartThenStop() throws {
+    @Test func testInternalWebSocketStartThenStop() throws {
         let host = Application(.testing)
         host.servers.use(.ws(host: "127.0.0.1", port: 10000))
         host.security.use(.noise)
         host.muxers.use(.mplex)
 
-        XCTAssertNoThrow(try host.start())
+        #expect(throws: Never.self) { try host.start() }
 
         print(host.listenAddresses)
         sleep(1)
 
-        XCTAssertEqual(host.listenAddresses.first, try! Multiaddr("/ip4/127.0.0.1/tcp/10000/ws"))
+        #expect(try host.listenAddresses.first == Multiaddr("/ip4/127.0.0.1/tcp/10000/ws"))
 
         host.shutdown()
     }
 
-    func testInternalWebSocketEcho() throws {
+    @Test func testInternalWebSocketEcho() async throws {
         let host = Application(.testing)
         host.servers.use(.ws(host: "127.0.0.1", port: 10000))
         host.security.use(.noise)
@@ -59,127 +60,102 @@ final class LibP2PWebSocketTests: XCTestCase {
             }
         }
 
-        XCTAssertNoThrow(try host.start())
-        XCTAssertNoThrow(try client.start())
-
-        //sleep(1)
+        try await host.startup()
+        try await client.startup()
 
         let hostAddress = host.listenAddresses.first
 
-        XCTAssertNotNil(hostAddress)
-        XCTAssertEqual(hostAddress, try! Multiaddr("/ip4/127.0.0.1/tcp/10000/ws"))
-        XCTAssertEqual(client.listenAddresses.first, try! Multiaddr("/ip4/127.0.0.1/tcp/10001/ws"))
-
-        let echoResponseExpectation = expectation(description: "Echo Response Expectation")
+        #expect(hostAddress != nil)
+        #expect(try hostAddress == Multiaddr("/ip4/127.0.0.1/tcp/10000/ws"))
+        #expect(try client.listenAddresses.first == Multiaddr("/ip4/127.0.0.1/tcp/10001/ws"))
 
         let echoMessage = "Hello from swift libp2p!"
-        client.newRequest(
+        let response = try await client.newRequest(
             to: hostAddress!,
             forProtocol: "/echo/1.0.0",
             withRequest: Data(echoMessage.utf8),
             withHandlers: .handlers([.newLineDelimited]),
             withTimeout: .seconds(4)
-        ).whenComplete { result in
-            switch result {
-            case .failure(let error):
-                XCTFail("\(error)")
-            case .success(let response):
-                guard let str = String(data: Data(response), encoding: .utf8) else {
-                    XCTFail("Failed to decode response data")
-                    break
-                }
-                XCTAssertEqual(str, "Hello from swift libp2p!")
-            }
-            echoResponseExpectation.fulfill()
-        }
+        ).get()
 
-        usleep(50_000)
+        guard let str = String(data: Data(response), encoding: .utf8) else {
+            Issue.record("Failed to decode response data")
+            return
+        }
+        #expect(str == echoMessage)
+
+        try await Task.sleep(for: .milliseconds(50))
 
         // After 50ms we should have some active connections to between our peers
         print("🔀🔀🔀 Connections Between Peers 🔀🔀🔀")
-        let clientConnections = (try? client.connections.getConnectionsToPeer(peer: host.peerID, on: nil).wait()) ?? []
-        XCTAssertGreaterThan(clientConnections.count, 0)
+        let clientConnections = try await client.connections.getConnectionsToPeer(peer: host.peerID, on: nil).get()
+        #expect(clientConnections.count > 0)
         for connection in clientConnections {
             print(connection)
         }
-        let hostConnections = (try? host.connections.getConnectionsToPeer(peer: client.peerID, on: nil).wait()) ?? []
-        XCTAssertGreaterThan(hostConnections.count, 0)
+        let hostConnections = try await host.connections.getConnectionsToPeer(peer: client.peerID, on: nil).get()
+        #expect(hostConnections.count > 0)
         for connection in hostConnections {
             print(connection)
         }
         print("----------------------------------------")
 
-        waitForExpectations(timeout: 5)
-
-        usleep(500_000)
+        try await Task.sleep(for: .milliseconds(500))
 
         // After 500ms of inactivity our connections between our peers should be pruned
         print("🔀🔀🔀 Connections Between Peers 🔀🔀🔀")
-        let clientConnections2 = (try? client.connections.getConnectionsToPeer(peer: host.peerID, on: nil).wait()) ?? []
-        XCTAssertEqual(clientConnections2.count, 0)
+        let clientConnections2 = try await client.connections.getConnectionsToPeer(peer: host.peerID, on: nil).get()
+        #expect(clientConnections2.count == 0)
         for connection in clientConnections2 {
             print(connection)
         }
-        let hostConnections2 = (try? host.connections.getConnectionsToPeer(peer: client.peerID, on: nil).wait()) ?? []
-        XCTAssertEqual(hostConnections2.count, 0)
+        let hostConnections2 = try await host.connections.getConnectionsToPeer(peer: client.peerID, on: nil).get()
+        #expect(hostConnections2.count == 0)
         for connection in hostConnections2 {
             print(connection)
         }
         print("----------------------------------------")
 
-        sleep(1)
+        try await Task.sleep(for: .seconds(1))
 
-        client.shutdown()
-        host.shutdown()
+        try await client.asyncShutdown()
+        try await host.asyncShutdown()
     }
 
-    func testExternalSwiftHostSameLAN() throws {
+    @Test(.externalIntegrationTestsEnabled)
+    func testExternalSwiftHostSameLAN() async throws {
         guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
             print("Skipping Integration Test")
             return
         }
         let client = Application(.testing)
-        client.servers.use(.tcp(host: "0.0.0.0", port: 10000))
+        client.servers.use(.ws(host: "0.0.0.0", port: 10000))
         client.security.use(.noise)
         client.muxers.use(.mplex)
-        //client.transports.use(.ws)
+        client.transports.use(.ws)
         client.logger.logLevel = .trace
 
-        XCTAssertNoThrow(try client.start())
+        try await client.startup()
 
         let hostAddress = try Multiaddr(
             "/ip4/192.168.1.44/tcp/10000/p2p/12D3KooWQekqjrkfVMP8aC2rExb3VQiuGJ4YGtq4gt5SsRMsmrdw"
         )
 
-        XCTAssertEqual(client.listenAddresses.first, try! Multiaddr("/ip4/0.0.0.0/tcp/10000"))
-
-        let echoResponseExpectation = expectation(description: "Echo Response Expectation")
+        #expect(try client.listenAddresses.first == Multiaddr("/ip4/0.0.0.0/tcp/10000"))
 
         let echoMessage = "Hello from swift libp2p!"
-        client.newRequest(
+        let response = try await client.newRequest(
             to: hostAddress,
             forProtocol: "/echo/1.0.0",
             withRequest: Data(echoMessage.utf8),
             withHandlers: .handlers([.newLineDelimited]),
             withTimeout: .seconds(2)
-        ).whenComplete { result in
-            switch result {
-            case .failure(let error):
-                XCTFail("\(error)")
-            case .success(let response):
-                guard let str = String(data: Data(response), encoding: .utf8) else {
-                    XCTFail("Failed to decode response data")
-                    break
-                }
-                print(str)
-                XCTAssertEqual(str, "Hello from swift libp2p!")
-            }
-            echoResponseExpectation.fulfill()
-        }
+        ).get()
 
-        waitForExpectations(timeout: 3)
+        let str = try #require(String(data: Data(response), encoding: .utf8))
+        #expect(str == echoMessage)
 
-        client.shutdown()
+        try await client.asyncShutdown()
     }
 
     /// **************************************
@@ -199,11 +175,8 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// ```
     /// - Note: Outbound Go WebSockets don't work. Not sure why.
     /// - Note: I think it's either a timing issue (it has worked a couple times in the past)
-    func testWebSocketSwiftClientGoHost() throws {
-        guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
-            print("Skipping Integration Test")
-            return
-        }
+    @Test(.externalIntegrationTestsEnabled)
+    func testWebSocketSwiftClientGoHost() async throws {
         let client = Application(.testing)
         client.servers.use(.ws(host: "0.0.0.0", port: 10000))
         client.security.use(.noise)
@@ -211,40 +184,27 @@ final class LibP2PWebSocketTests: XCTestCase {
         client.transports.use(.ws)
         client.logger.logLevel = .trace
 
-        XCTAssertNoThrow(try client.start())
+        try await client.startup()
 
         let hostAddress = try Multiaddr(
             "/ip4/127.0.0.1/tcp/10001/ws/p2p/QmVdiowCX42i1PeFpo2eadzHHMwa1Dn1VBCr4egQrj2XDm"
         )
 
-        //XCTAssertEqual(client.listenAddresses.first, try! Multiaddr("/ip4/0.0.0.0/tcp/10000/ws"))
-
-        let echoResponseExpectation = expectation(description: "Echo Response Expectation")
+        #expect(try client.listenAddresses.first == Multiaddr("/ip4/0.0.0.0/tcp/10000/ws"))
 
         let echoMessage = "Hello from swift libp2p!"
-        client.newRequest(
+        let response = try await client.newRequest(
             to: hostAddress,
             forProtocol: "/echo/1.0.0",
             withRequest: Data(echoMessage.utf8),
             withHandlers: .handlers([.newLineDelimited]),
             withTimeout: .seconds(2)
-        ).whenComplete { result in
-            switch result {
-            case .failure(let error):
-                XCTFail("\(error)")
-            case .success(let response):
-                guard let str = String(data: Data(response), encoding: .utf8) else {
-                    XCTFail("Failed to decode response data")
-                    break
-                }
-                XCTAssertEqual(str, "Hello from swift libp2p!")
-            }
-            echoResponseExpectation.fulfill()
-        }
+        ).get()
 
-        waitForExpectations(timeout: 3)
+        let str = try #require(String(data: Data(response), encoding: .utf8))
+        #expect(str == echoMessage)
 
-        client.shutdown()
+        try await client.asyncShutdown()
     }
 
     /// **************************************
@@ -260,11 +220,8 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// ./echo -l 10000 -d <your listening address>
     /// ```
     /// - Note: Inbound Go WebSockets work
-    func testWebSocketSwiftHostGoClient() throws {
-        guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
-            print("Skipping Integration Test")
-            return
-        }
+    @Test(.externalIntegrationTestsEnabled)
+    func testWebSocketSwiftHostGoClient() async throws {
         let host = Application(.testing)
         host.servers.use(.ws(host: "192.168.1.3", port: 10000))
         host.security.use(.noise)
@@ -275,40 +232,45 @@ final class LibP2PWebSocketTests: XCTestCase {
             "Swift Libp2p host listening on: \(host.listenAddresses.map { try! $0.encapsulate(proto: .p2p, address: host.peerID.b58String) })"
         )
 
-        let echoResponseExpectation = expectation(description: "Echo Response Expectation")
         let expectedMessages: Int = 1
         var echoedMessages: [String] = []
-        host.routes.on("echo", "1.0.0", handlers: [.newLineDelimited]) { req -> Response<ByteBuffer> in
-            print("/echo/1.0.0 request -> \(req)")
-            switch req.event {
-            case .ready:
-                return .stayOpen
-            case .data(let data):
-                if let str = String(data: Data(data.readableBytesView), encoding: .utf8) {
-                    echoedMessages.append(str)
-                } else {
-                    print("Non UTF8 Message Encountered")
+
+        try await confirmation(expectedCount: expectedMessages) { confirm in
+            let suspend = Task { try await Task.sleep(for: .seconds(60)) }
+
+            host.routes.on("echo", "1.0.0", handlers: [.newLineDelimited]) { req -> Response<ByteBuffer> in
+                print("/echo/1.0.0 request -> \(req)")
+                switch req.event {
+                case .ready:
+                    return .stayOpen
+                case .data(let data):
+                    if let str = String(data: Data(data.readableBytesView), encoding: .utf8) {
+                        echoedMessages.append(str)
+                    } else {
+                        print("Non UTF8 Message Encountered")
+                    }
+                    return .respondThenClose(data)
+                case .closed:
+                    if echoedMessages.count == expectedMessages {
+                        confirm()
+                        suspend.cancel()
+                    }
+                    return .close
+                case .error:
+                    return .close
                 }
-                return .respondThenClose(data)
-            case .closed:
-                if echoedMessages.count == expectedMessages {
-                    echoResponseExpectation.fulfill()
-                }
-                return .close
-            case .error:
-                return .close
             }
+
+            try await host.startup()
+            #expect(try host.listenAddresses.first == Multiaddr("/ip4/192.168.1.3/tcp/10000/ws"))
+
+            try await suspend.value
         }
 
-        XCTAssertNoThrow(try host.start())
-        XCTAssertEqual(host.listenAddresses.first, try! Multiaddr("/ip4/192.168.1.3/tcp/10000/ws"))
+        #expect(echoedMessages.count == expectedMessages)
+        #expect(echoedMessages.first == "Hello, world!")
 
-        waitForExpectations(timeout: 60)
-
-        XCTAssertEqual(echoedMessages.count, expectedMessages)
-        XCTAssertEqual(echoedMessages.first, "Hello, world!")
-
-        host.shutdown()
+        try await host.asyncShutdown()
     }
 
     /// **************************************
@@ -327,11 +289,8 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// // Run this test
     /// ```
     /// - Note: Unlike GO, JS does not delimit their messages with a newLine char
-    func testWebSocketSwiftClientJSHost() throws {
-        guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
-            print("Skipping Integration Test")
-            return
-        }
+    @Test(.externalIntegrationTestsEnabled)
+    func testWebSocketSwiftClientJSHost() async throws {
         let client = Application(.testing)
         client.servers.use(.ws(host: "127.0.0.1", port: 10000))
         client.security.use(.noise)
@@ -339,37 +298,26 @@ final class LibP2PWebSocketTests: XCTestCase {
         client.transports.use(.ws)
         client.logger.logLevel = .trace
 
-        XCTAssertNoThrow(try client.start())
-
-        //sleep(1)
+        try await client.startup()
 
         let hostAddress = try Multiaddr(
             "/ip4/192.168.1.22/tcp/10334/ws/p2p/QmcrQZ6RJdpYuGvZqD5QEHAv6qX4BrQLJLQPQUrTrzdcgm"
         )
 
-        XCTAssertEqual(client.listenAddresses.first, try! Multiaddr("/ip4/127.0.0.1/tcp/10000/ws"))
-
-        let echoResponseExpectation = expectation(description: "Echo Response Expectation")
+        #expect(try client.listenAddresses.first == Multiaddr("/ip4/127.0.0.1/tcp/10000/ws"))
 
         let echoMessage = "Hello from swift libp2p!"
-        client.newRequest(to: hostAddress, forProtocol: "/echo/1.0.0", withRequest: Data(echoMessage.utf8)).whenComplete
-        { result in
-            switch result {
-            case .failure(let error):
-                XCTFail("\(error)")
-            case .success(let response):
-                guard let str = String(data: Data(response), encoding: .utf8) else {
-                    XCTFail("Failed to decode response data")
-                    break
-                }
-                XCTAssertEqual(str, "Hello from swift libp2p!")
-            }
-            echoResponseExpectation.fulfill()
-        }
 
-        waitForExpectations(timeout: 5)
+        let response = try await client.newRequest(
+            to: hostAddress,
+            forProtocol: "/echo/1.0.0",
+            withRequest: Data(echoMessage.utf8)
+        ).get()
 
-        client.shutdown()
+        let str = try #require(String(data: Data(response), encoding: .utf8))
+        #expect(str == echoMessage)
+
+        try await client.asyncShutdown()
     }
 
     /// **************************************
@@ -388,11 +336,8 @@ final class LibP2PWebSocketTests: XCTestCase {
     /// ```
     /// - Note: This test requires the custom PeerID due to JS echo example using static keypairs and expecting them in the handshake
     /// - Note: Unlike GO, JS does not delimit their messages with a newLine char
-    func testWebSocketSwiftHostJSClient() throws {
-        guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
-            print("Skipping Integration Test")
-            return
-        }
+    @Test(.externalIntegrationTestsEnabled)
+    func testWebSocketSwiftHostJSClient() async throws {
         let str = """
             {
               "id": "QmcrQZ6RJdpYuGvZqD5QEHAv6qX4BrQLJLQPQUrTrzdcgm",
@@ -412,37 +357,60 @@ final class LibP2PWebSocketTests: XCTestCase {
             "Swift Libp2p host listening on: \(host.listenAddresses.map { try! $0.encapsulate(proto: .p2p, address: host.peerID.b58String) })"
         )
 
-        let echoResponseExpectation = expectation(description: "Echo Response Expectation")
+        let echoedMessages: NIOLockedValueBox<[String]> = .init([])
 
-        var echoedMessages: [String] = []
-        host.routes.on("echo", "1.0.0") { req -> Response<ByteBuffer> in
-            print("/echo/1.0.0 request -> \(req)")
-            switch req.event {
-            case .ready:
-                return .stayOpen
-            case .data(let data):
-                if let str = String(data: Data(data.readableBytesView), encoding: .utf8) {
-                    echoedMessages.append(str)
-                } else {
-                    print("Non UTF8 Message Encountered")
+        try await confirmation(expectedCount: 1) { confirm in
+            let suspend = Task { try await Task.sleep(for: .seconds(60)) }
+
+            host.routes.on("echo", "1.0.0") { req -> Response<ByteBuffer> in
+                print("/echo/1.0.0 request -> \(req)")
+                switch req.event {
+                case .ready:
+                    return .stayOpen
+                case .data(let data):
+                    if let str = String(data: Data(data.readableBytesView), encoding: .utf8) {
+                        echoedMessages.withLockedValue { $0.append(str) }
+                    } else {
+                        print("Non UTF8 Message Encountered")
+                    }
+                    return .respondThenClose(data)
+                case .closed:
+                    confirm()
+                    suspend.cancel()
+                    return .close
+                case .error:
+                    return .close
                 }
-                return .respondThenClose(data)
-            case .closed:
-                echoResponseExpectation.fulfill()
-                return .close
-            case .error:
-                return .close
             }
+
+            try await host.startup()
+            #expect(try host.listenAddresses.first == Multiaddr("/ip4/192.168.1.3/tcp/10000/ws"))
+
+            try await suspend.value
         }
 
-        XCTAssertNoThrow(try host.start())
-        XCTAssertEqual(host.listenAddresses.first, try! Multiaddr("/ip4/192.168.1.3/tcp/10000/ws"))
+        #expect(echoedMessages.withLockedValue({ $0 }).count == 1)
+        #expect(echoedMessages.withLockedValue({ $0 }).first == "hey")
 
-        waitForExpectations(timeout: 60)
+        try await host.asyncShutdown()
+    }
+}
 
-        XCTAssertEqual(echoedMessages.count, 1)
-        XCTAssertEqual(echoedMessages.first, "hey")
+struct TestHelper {
+    static var integrationTestsEnabled: Bool {
+        if let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" {
+            return true
+        }
+        return false
+    }
+}
 
-        host.shutdown()
+extension Trait where Self == ConditionTrait {
+    /// This test is only available when the `PerformIntegrationTests` environment variable is set to `true`
+    public static var externalIntegrationTestsEnabled: Self {
+        enabled(
+            if: TestHelper.integrationTestsEnabled,
+            "This test is only available when the `PerformIntegrationTests` environment variable is set to `true`"
+        )
     }
 }

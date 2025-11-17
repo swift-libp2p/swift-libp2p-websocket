@@ -19,17 +19,18 @@ import NIOWebSocket
 /// The HTTP handler to be used to initiate the request.
 /// This initial request will be adapted by the WebSocket upgrader to contain the upgrade header parameters.
 /// Channel read will only be called if the upgrade fails.
-internal final class HTTPInitialRequestHandler: ChannelInboundHandler, RemovableChannelHandler {
+internal final class HTTPInitialRequestHandler: ChannelInboundHandler, RemovableChannelHandler, Sendable {
     public typealias InboundIn = HTTPClientResponsePart
     public typealias OutboundOut = HTTPClientRequestPart
 
     public let target: Multiaddr
-    private var logger: Logger
+    private let logger: Logger
 
     public init(target: Multiaddr, logger: Logger) {
-        self.logger = logger  //Logger(label: "Transport:WS[\(logger)]:InitialRequest")
+        var logger = logger
+        logger[metadataKey: "WS"] = .string("UpgradeHandler")
+        self.logger = logger
         self.target = target
-        self.logger[metadataKey: "WS"] = .string("UpgradeHandler")
     }
 
     public func channelActive(context: ChannelHandlerContext) {
