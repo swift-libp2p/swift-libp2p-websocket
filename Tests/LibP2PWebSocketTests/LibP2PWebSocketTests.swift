@@ -358,7 +358,7 @@ struct LibP2PWebSocketTests {
         )
 
         let echoedMessages: NIOLockedValueBox<[String]> = .init([])
-        
+
         try await confirmation(expectedCount: 1) { confirm in
             let suspend = Task { try await Task.sleep(for: .seconds(60)) }
 
