@@ -39,13 +39,13 @@ struct LibP2PWebSocketTests {
     }
 
     @Test func testInternalWebSocketEcho() async throws {
-        let host = Application(.testing)
+        let host = try await Application.make(.testing, peerID: .ephemeral())
         host.servers.use(.ws(host: "127.0.0.1", port: 10000))
         host.security.use(.noise)
         host.muxers.use(.mplex)
         host.logger.logLevel = .trace
 
-        let client = Application(.testing)
+        let client = try await Application.make(.testing, peerID: .ephemeral())
         client.servers.use(.ws(host: "127.0.0.1", port: 10001))
         client.security.use(.noise)
         client.muxers.use(.mplex)
@@ -128,7 +128,7 @@ struct LibP2PWebSocketTests {
             print("Skipping Integration Test")
             return
         }
-        let client = Application(.testing)
+        let client = try await Application.make(.testing, peerID: .ephemeral())
         client.servers.use(.ws(host: "0.0.0.0", port: 10000))
         client.security.use(.noise)
         client.muxers.use(.mplex)
@@ -177,7 +177,7 @@ struct LibP2PWebSocketTests {
     /// - Note: I think it's either a timing issue (it has worked a couple times in the past)
     @Test(.externalIntegrationTestsEnabled)
     func testWebSocketSwiftClientGoHost() async throws {
-        let client = Application(.testing)
+        let client = try await Application.make(.testing, peerID: .ephemeral())
         client.servers.use(.ws(host: "0.0.0.0", port: 10000))
         client.security.use(.noise)
         client.muxers.use(.mplex)
@@ -222,7 +222,7 @@ struct LibP2PWebSocketTests {
     /// - Note: Inbound Go WebSockets work
     @Test(.externalIntegrationTestsEnabled)
     func testWebSocketSwiftHostGoClient() async throws {
-        let host = Application(.testing)
+        let host = try await Application.make(.testing, peerID: .ephemeral())
         host.servers.use(.ws(host: "192.168.1.3", port: 10000))
         host.security.use(.noise)
         host.muxers.use(.mplex)
@@ -291,7 +291,7 @@ struct LibP2PWebSocketTests {
     /// - Note: Unlike GO, JS does not delimit their messages with a newLine char
     @Test(.externalIntegrationTestsEnabled)
     func testWebSocketSwiftClientJSHost() async throws {
-        let client = Application(.testing)
+        let client = try await Application.make(.testing, peerID: .ephemeral())
         client.servers.use(.ws(host: "127.0.0.1", port: 10000))
         client.security.use(.noise)
         client.muxers.use(.mplex)
@@ -347,7 +347,7 @@ struct LibP2PWebSocketTests {
             """
         let peerID = try PeerID(fromJSON: str.data(using: .utf8)!)
 
-        let host = Application(.testing, peerID: peerID)
+        let host = try await Application.make(.testing, peerID: peerID)
         host.servers.use(.ws(host: "192.168.1.3", port: 10000))
         host.security.use(.noise)
         host.muxers.use(.mplex)
