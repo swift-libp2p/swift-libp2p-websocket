@@ -2,7 +2,7 @@
 //
 // This source file is part of the swift-libp2p open source project
 //
-// Copyright (c) 2022-2025 swift-libp2p project authors
+// Copyright (c) 2022-2026 swift-libp2p project authors
 // Licensed under MIT
 //
 // See LICENSE for license information
@@ -13,26 +13,16 @@
 //===----------------------------------------------------------------------===//
 
 import LibP2P
-import NIOConcurrencyHelpers
+import NIOCore
 import NIOHTTP1
 
+/// Handles plain HTTP requests that did not ask for a WebSocket upgrade.
+///
+/// GETs receive an empty `200 OK`, everything else a `405 Method Not Allowed`, and the channel is closed either way.
+/// This handler is stateless, so it's safe to capture in the (`@Sendable`) upgrade completion handler.
 internal final class ServerUpgradeHandler: ChannelInboundHandler, RemovableChannelHandler, Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
-
-    private var responseBody: ByteBuffer? {
-        get { _responseBody.withLockedValue { $0 } }
-        set { _responseBody.withLockedValue { $0 = newValue } }
-    }
-    private let _responseBody: NIOLockedValueBox<ByteBuffer?> = .init(nil)
-
-    func handlerAdded(context: ChannelHandlerContext) {
-        self.responseBody = context.channel.allocator.buffer(string: "")
-    }
-
-    func handlerRemoved(context: ChannelHandlerContext) {
-        self.responseBody = nil
-    }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let reqPart = self.unwrapInboundIn(data)
@@ -51,7 +41,7 @@ internal final class ServerUpgradeHandler: ChannelInboundHandler, RemovableChann
 
         var headers = HTTPHeaders()
         headers.add(name: "Content-Type", value: "text/html")
-        headers.add(name: "Content-Length", value: String(self.responseBody!.readableBytes))
+        headers.add(name: "Content-Length", value: "0")
         headers.add(name: "Connection", value: "close")
         let responseHead = HTTPResponseHead(
             version: .init(major: 1, minor: 1),
@@ -59,8 +49,7 @@ internal final class ServerUpgradeHandler: ChannelInboundHandler, RemovableChann
             headers: headers
         )
         context.write(self.wrapOutboundOut(.head(responseHead)), promise: nil)
-        context.write(self.wrapOutboundOut(.body(.byteBuffer(self.responseBody!))), promise: nil)
-        context.write(self.wrapOutboundOut(.end(nil))).whenComplete { (_: Result<Void, Error>) in
+        context.write(self.wrapOutboundOut(.end(nil))).assumeIsolated().whenComplete { _ in
             context.close(promise: nil)
         }
         context.flush()
@@ -76,7 +65,7 @@ internal final class ServerUpgradeHandler: ChannelInboundHandler, RemovableChann
             headers: headers
         )
         context.write(self.wrapOutboundOut(.head(head)), promise: nil)
-        context.write(self.wrapOutboundOut(.end(nil))).whenComplete { (_: Result<Void, Error>) in
+        context.write(self.wrapOutboundOut(.end(nil))).assumeIsolated().whenComplete { _ in
             context.close(promise: nil)
         }
         context.flush()
