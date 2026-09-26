@@ -53,6 +53,11 @@ public struct WebSocket: Transport {
     /// How long the HTTP -> WebSocket upgrade may take once the socket is connected.
     public static let defaultUpgradeTimeout: TimeAmount = .seconds(10)
 
+    /// The largest WebSocket frame (and reassembled message) we'll accept.
+    ///
+    /// NIO's upgraders default to 16 KiB, which is smaller than a single max-size Noise frame (64 KiB).
+    public static let defaultMaxFrameSize: Int = 1 << 20
+
     public var sharedClient: ClientBootstrap {
         let lock = self.application.locks.lock(for: Key.self)
         lock.lock()
@@ -152,11 +157,13 @@ public struct WebSocket: Transport {
             /// requestKey: "dGhlIHNhbXBsZSBub25jZQ==",
             /// requestKey: "OfS0wDaT5NoxF2gqm7Zj2YtetzM=",
             let websocketUpgrader = NIOWebSocketClientUpgrader(
+                maxFrameSize: Self.defaultMaxFrameSize,
                 upgradePipelineHandler: { (channel: Channel, _: HTTPResponseHead) in
                     do {
-                        try channel.pipeline.syncOperations.addHandler(
-                            WebSocketDuplexHandler(mode: .initiator, logger: logger),
-                            position: .last
+                        try channel.pipeline.syncOperations.addWebSocketDuplexHandlers(
+                            mode: .initiator,
+                            maxFrameSize: Self.defaultMaxFrameSize,
+                            logger: logger
                         )
                     } catch {
                         adopted.fail(error)
