@@ -196,8 +196,6 @@ public struct WebSocket: Transport {
 
     /// Parses the Multiaddr and determines if it's a valid WebSocket endpoint that can be dialed
     public func canDial(address: Multiaddr) -> Bool {
-        //address.tcpAddress != nil && !address.protocols().contains(.ws)
-        print("WS Can Dial -> \(address)")
         guard let tcp = address.tcpAddress else { return false }
         // Remove once we can dial ipv6 addresses
         guard tcp.ip4 else { return false }
@@ -249,16 +247,4 @@ extension Application.Transports.Provider {
     //            }
     //        }
     //    }
-}
-
-extension WebSocketMaskingKey {
-    static var random4ByteKey: Self {
-        .init(
-            arrayLiteral:
-                UInt8.random(in: UInt8.min...UInt8.max),
-            UInt8.random(in: UInt8.min...UInt8.max),
-            UInt8.random(in: UInt8.min...UInt8.max),
-            UInt8.random(in: UInt8.min...UInt8.max)
-        )
-    }
 }
