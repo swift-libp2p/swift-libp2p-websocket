@@ -58,18 +58,20 @@ public struct WebSocket: Transport {
         lock.lock()
         defer { lock.unlock() }
         if let existing = self.application.storage[Key.self] {
-            return existing
+            return existing.bootstrap
         }
         let new = ClientBootstrap(group: self.application.eventLoopGroup)
             // Enable SO_REUSEADDR.
             .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
+            // Match the accept side, which sets TCP_NODELAY on every child channel.
+            .channelOption(ChannelOptions.tcpOption(.tcp_nodelay), value: 1)
+            .channelOption(ChannelOptions.connectTimeout, value: Self.defaultConnectTimeout)
             .channelInitializer { channel in
-                // Do we install the upgrader here or do we let the Connection install the handlers???
-                //channel.pipeline.addHandlers(upgrader.channelHandlers(mode: .initiator)) // The MSS Handler itself needs to have access to the Connection Delegate
+                // The HTTP / WebSocket upgrade handlers are installed per dial (see `dial(address:)`)
                 channel.eventLoop.makeSucceededVoidFuture()
             }
 
-        self.application.storage.set(Key.self, to: new)
+        self.application.storage.set(Key.self, to: SharedDialBootstrap(new))
 
         return new
     }
@@ -102,32 +104,47 @@ public struct WebSocket: Transport {
 
     /// For each new Dial, we connect to the desired multiaddr, then install our handlers
     /// 1) Http 1.1 initial request handler (with client upgrader config)
-    /// 2) WebSocket Handler
-    /// 3) We then let the connection proceed to initialize itself on the channel / pipeline
+    /// 2) Once the upgrade completes, the WebSocket Handler
+    /// 3) We then hand the upgraded channel to the ConnectionManager (`adoptOutbound`), which registers the
+    ///    connection, installs the quiesce / backpressure handlers, and kicks off the security + muxer upgrade.
+    ///
+    /// The returned future only succeeds once the WebSocket upgrade has completed and the connection has been adopted.
+    /// A failed upgrade, early close, or a timeout fails the dial.
     public func dial(address: Multiaddr) -> EventLoopFuture<Connection> {
         guard let tcp = address.tcpAddress else {
             self.application.logger.warning("Invalid Mutliaddr. WS can't dial \(address)")
             return self.application.eventLoopGroup.any().makeFailedFuture(Errors.invalidMultiaddr)
         }
-        //guard let requestKey = try? LibP2PCrypto.randomBytes(length: 16).asString(base: .base64Pad) else {
-        //    return self.application.eventLoopGroup.any().makeFailedFuture(Errors.failedToGenerateWSMaskingKey)
-        //}
+
+        let application = self.application
+        application.logger.trace("Attempting to dial \(address)")
 
         return sharedClient.connect(host: tcp.address, port: tcp.port).flatMap {
             channel -> EventLoopFuture<Connection> in
 
-            self.application.logger.trace("Instantiating new Connection")
-            let conn = application.connectionManager.generateConnection(
-                channel: channel,
-                direction: .outbound,
-                remoteAddress: address,
-                expectedRemotePeer: try? address.getPeerID()
-            )
+            let logger: Logger = {
+                var logger = application.logger
+                logger[metadataKey: "WS"] = .string("\(address)")
+                return logger
+            }()
 
-            /// The connection installs the necessary channel handlers here
-            //self.application.logger.trace("Asking BasicConnectionLight to instantiate new outbound channel")
+            // Completed once the upgraded channel has been adopted by the ConnectionManager
+            let adopted = channel.eventLoop.makePromise(of: Connection.self)
 
-            let httpHandler = HTTPInitialRequestHandler(target: address, logger: conn.logger)
+            // Fail the dial if the upgrade doesn't complete in time.
+            let upgradeTimeout = channel.eventLoop.scheduleTask(in: Self.defaultUpgradeTimeout) {
+                adopted.fail(Errors.upgradeTimedOut)
+                channel.close(mode: .all, promise: nil)
+            }
+            // Fail the dial if the channel closes before the upgrade / adoption completes.
+            // Failing an already completed promise is a no-op.
+            channel.closeFuture.whenComplete { _ in
+                adopted.fail(Errors.upgradeFailed)
+            }
+            // Cancel the upgrade timeout if we're adopted
+            adopted.futureResult.whenComplete { _ in upgradeTimeout.cancel() }
+
+            let httpHandler = HTTPInitialRequestHandler(target: address, logger: logger)
 
             /// - Note: The default requestKey NIO generates seems to work now!
             /// swift-nio recommends 28 char requestKey, Go supports 28 char keys
@@ -135,42 +152,45 @@ public struct WebSocket: Transport {
             /// requestKey: "dGhlIHNhbXBsZSBub25jZQ==",
             /// requestKey: "OfS0wDaT5NoxF2gqm7Zj2YtetzM=",
             let websocketUpgrader = NIOWebSocketClientUpgrader(
-                //requestKey: requestKey,
-                upgradePipelineHandler: { (channel: Channel, head: HTTPResponseHead) in
-                    print(head)
-                    let wsh = WebSocketDuplexHandler(mode: .initiator, logger: conn.logger)
-                    return channel.pipeline.addHandler(BackPressureHandler(), position: .first).flatMap {
-                        channel.pipeline.addHandler(wsh, position: .last).flatMap {
-                            /// Add the connection to our connectionManager
-                            //return self.application.connections.addConnection(conn, on: nil).flatMap {
-                            /// Tell our connection to initialize the channel
-                            conn.initializeChannel().map {
-                                wsh.fireChannelActiveIfNecessary()
-                            }
-                            //}
-                        }
+                upgradePipelineHandler: { (channel: Channel, _: HTTPResponseHead) in
+                    do {
+                        try channel.pipeline.syncOperations.addHandler(
+                            WebSocketDuplexHandler(mode: .initiator, logger: logger),
+                            position: .last
+                        )
+                    } catch {
+                        adopted.fail(error)
+                        return channel.eventLoop.makeFailedFuture(error)
                     }
+                    /// Hand the upgraded channel to the ConnectionManager.
+                    /// Outbound dials are gated pre-dial, so admission goes straight to the manager.
+                    let adoption = application.connectionManager.adoptOutbound(
+                        channel: channel,
+                        remoteAddress: address
+                    ).map { $0 as Connection }
+                    adopted.completeWith(adoption)
+                    return adoption.map { _ in }
                 }
             )
 
             /// Create the Upgrader Configuration
             let config: NIOHTTPClientUpgradeConfiguration = (
                 upgraders: [websocketUpgrader],
-                completionHandler: { _ in
-                    channel.pipeline.removeHandler(httpHandler, promise: nil)
+                completionHandler: { context in
+                    context.pipeline.syncOperations.removeHandler(httpHandler, promise: nil)
                 }
             )
 
-            /// Instantiate the connection with the http handlers and the WS upgrader
-            /// /// Add the connection to our connectionManager
-            return channel.pipeline.addHTTPClientHandlers(withClientUpgrade: config).flatMap {
-                channel.pipeline.addHandler(httpHandler).flatMap {
-                    self.application.connections.addConnection(conn, on: nil).flatMap {
-                        // We normally call Connection.initializeChannel() here, but we wait to call this until the WebSocket upgrade is completed (above)...
-                        channel.eventLoop.makeSucceededFuture(conn)
-                    }
-                }
+            /// Install the http handlers and the WS upgrader, then wait for the upgrade + adoption to complete
+            do {
+                try channel.pipeline.syncOperations.addHTTPClientHandlers(withClientUpgrade: config)
+                try channel.pipeline.syncOperations.addHandler(httpHandler)
+            } catch {
+                adopted.fail(error)
+                channel.close(mode: .all, promise: nil)
             }
+
+            return adopted.futureResult
         }
     }
 
@@ -186,12 +206,8 @@ public struct WebSocket: Transport {
         return true
     }
 
-    public func listen(address: Multiaddr) -> EventLoopFuture<Listener> {
-        application.eventLoopGroup.any().makeFailedFuture(Errors.notYetImplemeted)
-    }
-
     struct Key: StorageKey, LockKey {
-        typealias Value = ClientBootstrap
+        typealias Value = SharedDialBootstrap
     }
 
     //    struct ConfigurationKey: StorageKey {
@@ -202,6 +218,20 @@ public struct WebSocket: Transport {
         case notYetImplemeted
         case invalidMultiaddr
         case failedToGenerateWSMaskingKey
+        /// The remote closed the channel, or rejected the HTTP -> WebSocket upgrade, before the connection was established.
+        case upgradeFailed
+        /// The HTTP -> WebSocket upgrade didn't complete within ``WebSocket/defaultUpgradeTimeout``.
+        case upgradeTimedOut
+    }
+}
+
+/// Holds the shared dial bootstrap so it can live in `Application.storage` without
+/// retroactively conforming NIO's `ClientBootstrap`.
+final class SharedDialBootstrap: @unchecked Sendable {
+    let bootstrap: ClientBootstrap
+
+    init(_ bootstrap: ClientBootstrap) {
+        self.bootstrap = bootstrap
     }
 }
 
