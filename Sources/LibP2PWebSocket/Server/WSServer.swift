@@ -43,13 +43,13 @@ public final class WSServer: Server, @unchecked Sendable {
     public struct Configuration: Sendable {
         public static let defaultHostname = "127.0.0.1"
         public static let defaultPort = 10001
+        /// NIO's own default number of `read` calls per event-loop tick, per accepted connection.
+        public static let defaultMaxMessagesPerRead: UInt = 4
 
         /// Address the server will bind to. Configuring an address using a hostname with a nil host or port will use the default hostname or port respectively.
-        public var address: BindAddress {
-            get { _address.withLockedValue { $0 } }
-            set { _address.withLockedValue { $0 = newValue } }
-        }
-        private let _address: NIOLockedValueBox<BindAddress>
+        ///
+        /// - Note: This is a plain stored value so copies of a `Configuration` don't share (and mutate) each others address.
+        public var address: BindAddress
 
         /// Host name the server will bind to.
         public var hostname: String {
@@ -100,6 +100,12 @@ public final class WSServer: Server, @unchecked Sendable {
         /// When `true`, OS will attempt to minimize TCP packet delay.
         public var tcpNoDelay: Bool
 
+        /// Maximum number of `read` calls the accept side will issue per event-loop tick, per accepted connection.
+        public var maxMessagesPerRead: UInt
+
+        /// The largest WebSocket frame (and reassembled message) we'll accept from a remote peer.
+        public var maxFrameSize: Int
+
         //public var tlsConfiguration: TLSConfiguration?
 
         /// If set, this name will be serialized as the `Server` header in outgoing responses.
@@ -117,6 +123,8 @@ public final class WSServer: Server, @unchecked Sendable {
             backlog: Int = 256,
             reuseAddress: Bool = true,
             tcpNoDelay: Bool = true,
+            maxMessagesPerRead: UInt = Self.defaultMaxMessagesPerRead,
+            maxFrameSize: Int = WebSocket.defaultMaxFrameSize,
             //            responseCompression: CompressionConfiguration = .disabled,
             //            requestDecompression: DecompressionConfiguration = .disabled,
             //            supportPipelining: Bool = true,
@@ -131,6 +139,8 @@ public final class WSServer: Server, @unchecked Sendable {
                 backlog: backlog,
                 reuseAddress: reuseAddress,
                 tcpNoDelay: tcpNoDelay,
+                maxMessagesPerRead: maxMessagesPerRead,
+                maxFrameSize: maxFrameSize,
                 //                responseCompression: responseCompression,
                 //                requestDecompression: requestDecompression,
                 //                supportPipelining: supportPipelining,
@@ -147,6 +157,8 @@ public final class WSServer: Server, @unchecked Sendable {
             backlog: Int = 256,
             reuseAddress: Bool = true,
             tcpNoDelay: Bool = true,
+            maxMessagesPerRead: UInt = Self.defaultMaxMessagesPerRead,
+            maxFrameSize: Int = WebSocket.defaultMaxFrameSize,
             //            responseCompression: CompressionConfiguration = .disabled,
             //            requestDecompression: DecompressionConfiguration = .disabled,
             //            supportPipelining: Bool = true,
@@ -156,10 +168,12 @@ public final class WSServer: Server, @unchecked Sendable {
             logger: Logger? = nil,
             shutdownTimeout: TimeAmount = .seconds(10)
         ) {
-            self._address = .init(address)
+            self.address = address
             self.backlog = backlog
             self.reuseAddress = reuseAddress
             self.tcpNoDelay = tcpNoDelay
+            self.maxMessagesPerRead = maxMessagesPerRead
+            self.maxFrameSize = maxFrameSize
             //            self.responseCompression = responseCompression
             //            self.requestDecompression = requestDecompression
             //            self.supportPipelining = supportPipelining
