@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.1
 //===----------------------------------------------------------------------===//
 //
 // This source file is part of the swift-libp2p open source project
@@ -18,8 +18,8 @@ import PackageDescription
 let package = Package(
     name: "swift-libp2p-websocket",
     platforms: [
-        .macOS(.v10_15),
-        .iOS(.v13),
+        .macOS(.v13),
+        .iOS(.v16),
     ],
     products: [
         // Products define the executables and libraries a package produces, and make them visible to other packages.
@@ -30,12 +30,12 @@ let package = Package(
     ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
-        .package(url: "https://github.com/swift-libp2p/swift-libp2p.git", .upToNextMinor(from: "0.3.3")),
-        .package(url: "https://github.com/apple/swift-nio.git", .upToNextMajor(from: "2.0.0")),
+        .package(url: "https://github.com/swift-libp2p/swift-libp2p.git", .upToNextMinor(from: "0.4.0")),
+        .package(url: "https://github.com/apple/swift-nio.git", .upToNextMajor(from: "2.87.0")),
 
         // Testing
-        .package(url: "https://github.com/swift-libp2p/swift-libp2p-noise", .upToNextMinor(from: "0.2.0")),
-        .package(url: "https://github.com/swift-libp2p/swift-libp2p-mplex", .upToNextMinor(from: "0.2.0")),
+        .package(url: "https://github.com/swift-libp2p/swift-libp2p-noise", .upToNextMinor(from: "0.3.0")),
+        .package(url: "https://github.com/swift-libp2p/swift-libp2p-mplex", .upToNextMinor(from: "0.3.0")),
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
@@ -44,13 +44,18 @@ let package = Package(
             name: "LibP2PWebSocket",
             dependencies: [
                 .product(name: "LibP2P", package: "swift-libp2p"),
+                .product(name: "NIOCore", package: "swift-nio"),
+                .product(name: "NIOPosix", package: "swift-nio"),
+                .product(name: "NIOHTTP1", package: "swift-nio"),
                 .product(name: "NIOWebSocket", package: "swift-nio"),
+                .product(name: "NIOConcurrencyHelpers", package: "swift-nio"),
             ]
         ),
         .testTarget(
             name: "LibP2PWebSocketTests",
             dependencies: [
                 "LibP2PWebSocket",
+                .product(name: "LibP2PTesting", package: "swift-libp2p"),
                 .product(name: "LibP2PNoise", package: "swift-libp2p-noise"),
                 .product(name: "LibP2PMPLEX", package: "swift-libp2p-mplex"),
             ]
