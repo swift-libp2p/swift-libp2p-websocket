@@ -2,7 +2,7 @@
 //
 // This source file is part of the swift-libp2p open source project
 //
-// Copyright (c) 2022-2025 swift-libp2p project authors
+// Copyright (c) 2022-2026 swift-libp2p project authors
 // Licensed under MIT
 //
 // See LICENSE for license information
@@ -40,24 +40,26 @@ extension Application.WS {
         let application: Application
 
         public var shared: WSServer {
+            // Hold the lock for the entire call
+            let lock = self.application.locks.lock(for: Key.self)
+            lock.lock()
+            defer { lock.unlock() }
+
             if let existing = self.application.storage[Key.self] {
                 return existing
-            } else {
-                let new = WSServer.init(
-                    application: self.application,
-                    responder: self.application.responder.current,
-                    configuration: self.configuration,
-                    on: self.application.eventLoopGroup
-                )
-                self.application.storage[Key.self] = new
-                // Add lifecycle handler.
-                //self.application.logger.trace("Initialized WS Server, hooking into lifecycle handler")
-                //self.application.lifecycle.use(new)
-                return new
             }
+            let new = WSServer(
+                application: self.application,
+                responder: self.application.responder.current,
+                configuration: self.configuration,
+                on: self.application.eventLoopGroup
+            )
+            // Release the listening socket on shutdown.
+            self.application.storage.set(Key.self, to: new) { $0.shutdown() }
+            return new
         }
 
-        struct Key: StorageKey {
+        struct Key: StorageKey, LockKey {
             typealias Value = WSServer
         }
 
