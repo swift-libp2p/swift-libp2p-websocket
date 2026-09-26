@@ -56,6 +56,7 @@ let package = Package(
             dependencies: [
                 "LibP2PWebSocket",
                 .product(name: "LibP2PTesting", package: "swift-libp2p"),
+                .product(name: "NIOEmbedded", package: "swift-nio"),
                 .product(name: "LibP2PNoise", package: "swift-libp2p-noise"),
                 .product(name: "LibP2PMPLEX", package: "swift-libp2p-mplex"),
             ]
