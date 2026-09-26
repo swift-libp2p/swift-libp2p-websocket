@@ -2,7 +2,7 @@
 //
 // This source file is part of the swift-libp2p open source project
 //
-// Copyright (c) 2022-2025 swift-libp2p project authors
+// Copyright (c) 2022-2026 swift-libp2p project authors
 // Licensed under MIT
 //
 // See LICENSE for license information
@@ -12,9 +12,14 @@
 //
 //===----------------------------------------------------------------------===//
 
+import Foundation
 import LibP2P
+import Logging
+import Multiaddr
 import NIOConcurrencyHelpers
+import NIOCore
 import NIOHTTP1
+import NIOPosix
 import NIOWebSocket
 
 // Install our WS Tranport on the LibP2P Application
@@ -41,6 +46,12 @@ public struct WebSocket: Transport {
         self._proxy = .init(proxy)
         self.uuid = uuid
     }
+
+    /// How long a dial may spend in `connect` before we give up.
+    public static let defaultConnectTimeout: TimeAmount = .seconds(10)
+
+    /// How long the HTTP -> WebSocket upgrade may take once the socket is connected.
+    public static let defaultUpgradeTimeout: TimeAmount = .seconds(10)
 
     public var sharedClient: ClientBootstrap {
         let lock = self.application.locks.lock(for: Key.self)
