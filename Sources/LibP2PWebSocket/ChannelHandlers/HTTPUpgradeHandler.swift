@@ -2,7 +2,7 @@
 //
 // This source file is part of the swift-libp2p open source project
 //
-// Copyright (c) 2022-2025 swift-libp2p project authors
+// Copyright (c) 2022-2026 swift-libp2p project authors
 // Licensed under MIT
 //
 // See LICENSE for license information
@@ -34,7 +34,7 @@ internal final class HTTPInitialRequestHandler: ChannelInboundHandler, Removable
     }
 
     public func channelActive(context: ChannelHandlerContext) {
-        self.logger.trace("WS HTTP Client connected to \(context.remoteAddress!)")
+        self.logger.trace("WS HTTP Client connected to \(context.remoteAddress?.description ?? "unknown address")")
 
         // We are connected. It's time to send the message to the server to initialize the upgrade dance.
         var headers = HTTPHeaders()
