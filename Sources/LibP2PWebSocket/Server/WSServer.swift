@@ -520,20 +520,6 @@ private final class WSServerConnection: Sendable {
     }
 }
 
-final class WSServerErrorHandler: ChannelInboundHandler {
-    typealias InboundIn = Never
-    let logger: Logger
-
-    init(logger: Logger) {
-        self.logger = logger
-    }
-
-    func errorCaught(context: ChannelHandlerContext, error: Error) {
-        self.logger.error("Unhandled WS server error: \(error)")
-        context.close(mode: .output, promise: nil)
-    }
-}
-
 //extension ChannelPipeline {
 //    func addTCPHandlers(
 //        application: Application,
