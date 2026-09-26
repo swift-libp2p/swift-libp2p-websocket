@@ -2,7 +2,7 @@
 //
 // This source file is part of the swift-libp2p open source project
 //
-// Copyright (c) 2022-2025 swift-libp2p project authors
+// Copyright (c) 2022-2026 swift-libp2p project authors
 // Licensed under MIT
 //
 // See LICENSE for license information
@@ -12,9 +12,15 @@
 //
 //===----------------------------------------------------------------------===//
 
+import Foundation
 import LibP2P
 import LibP2PMPLEX
 import LibP2PNoise
+import LibP2PTesting
+import Logging
+import Multiaddr
+import NIOConcurrencyHelpers
+import NIOCore
 import Testing
 
 @testable import LibP2PWebSocket
@@ -22,20 +28,29 @@ import Testing
 @Suite("Libp2p WebSocket Tests", .serialized)
 struct LibP2PWebSocketTests {
 
-    @Test func testInternalWebSocketStartThenStop() throws {
-        let host = Application(.testing)
+    /// Exercise our transport agaist libp2p's built-in transport test harness
+    @Test func testTransportConformance() async throws {
+        let report = try await runTransportConformance(transportKey: WebSocket.key) { app in
+            app.servers.use(.ws(host: "127.0.0.1", port: 0))
+            app.transports.use(.ws)
+        }
+        print(report)
+        try report.throwIfFailed()
+    }
+
+    @Test func testInternalWebSocketStartThenStop() async throws {
+        let host = try await Application.make(.testing)
         host.servers.use(.ws(host: "127.0.0.1", port: 10000))
         host.security.use(.noise)
         host.muxers.use(.mplex)
 
-        #expect(throws: Never.self) { try host.start() }
+        try await host.startup()
 
         print(host.listenAddresses)
-        sleep(1)
 
         #expect(try host.listenAddresses.first == Multiaddr("/ip4/127.0.0.1/tcp/10000/ws"))
 
-        host.shutdown()
+        try await host.asyncShutdown()
     }
 
     @Test func testInternalWebSocketEcho() async throws {
@@ -76,7 +91,7 @@ struct LibP2PWebSocketTests {
             withRequest: Data(echoMessage.utf8),
             withHandlers: .handlers([.newLineDelimited]),
             withTimeout: .seconds(4)
-        ).get()
+        )
 
         guard let str = String(data: Data(response), encoding: .utf8) else {
             Issue.record("Failed to decode response data")
@@ -100,23 +115,15 @@ struct LibP2PWebSocketTests {
         }
         print("----------------------------------------")
 
-        try await Task.sleep(for: .milliseconds(500))
-
-        // After 500ms of inactivity our connections between our peers should be pruned
-        print("🔀🔀🔀 Connections Between Peers 🔀🔀🔀")
-        let clientConnections2 = try await client.connections.getConnectionsToPeer(peer: host.peerID, on: nil).get()
-        #expect(clientConnections2.count == 0)
-        for connection in clientConnections2 {
-            print(connection)
+        // Once idle, the ConnectionManager's idle timeout (3s by default) should prune the connections between our peers
+        let hostPeer = host.peerID
+        let clientPeer = client.peerID
+        let pruned = try await waitUntil {
+            let clientConnections = try await client.connections.getConnectionsToPeer(peer: hostPeer)
+            let hostConnections = try await host.connections.getConnectionsToPeer(peer: clientPeer)
+            return clientConnections.isEmpty && hostConnections.isEmpty
         }
-        let hostConnections2 = try await host.connections.getConnectionsToPeer(peer: client.peerID, on: nil).get()
-        #expect(hostConnections2.count == 0)
-        for connection in hostConnections2 {
-            print(connection)
-        }
-        print("----------------------------------------")
-
-        try await Task.sleep(for: .seconds(1))
+        #expect(pruned, "Idle connections between our peers were not pruned")
 
         try await client.asyncShutdown()
         try await host.asyncShutdown()
@@ -150,7 +157,7 @@ struct LibP2PWebSocketTests {
             withRequest: Data(echoMessage.utf8),
             withHandlers: .handlers([.newLineDelimited]),
             withTimeout: .seconds(2)
-        ).get()
+        )
 
         let str = try #require(String(data: Data(response), encoding: .utf8))
         #expect(str == echoMessage)
@@ -199,7 +206,7 @@ struct LibP2PWebSocketTests {
             withRequest: Data(echoMessage.utf8),
             withHandlers: .handlers([.newLineDelimited]),
             withTimeout: .seconds(2)
-        ).get()
+        )
 
         let str = try #require(String(data: Data(response), encoding: .utf8))
         #expect(str == echoMessage)
@@ -233,7 +240,7 @@ struct LibP2PWebSocketTests {
         )
 
         let expectedMessages: Int = 1
-        var echoedMessages: [String] = []
+        let echoedMessages: NIOLockedValueBox<[String]> = .init([])
 
         try await confirmation(expectedCount: expectedMessages) { confirm in
             let suspend = Task { try await Task.sleep(for: .seconds(60)) }
@@ -245,13 +252,13 @@ struct LibP2PWebSocketTests {
                     return .stayOpen
                 case .data(let data):
                     if let str = String(data: Data(data.readableBytesView), encoding: .utf8) {
-                        echoedMessages.append(str)
+                        echoedMessages.withLockedValue { $0.append(str) }
                     } else {
                         print("Non UTF8 Message Encountered")
                     }
                     return .respondThenClose(data)
                 case .closed:
-                    if echoedMessages.count == expectedMessages {
+                    if echoedMessages.withLockedValue({ $0.count }) == expectedMessages {
                         confirm()
                         suspend.cancel()
                     }
@@ -267,8 +274,8 @@ struct LibP2PWebSocketTests {
             try await suspend.value
         }
 
-        #expect(echoedMessages.count == expectedMessages)
-        #expect(echoedMessages.first == "Hello, world!")
+        #expect(echoedMessages.withLockedValue({ $0 }).count == expectedMessages)
+        #expect(echoedMessages.withLockedValue({ $0 }).first == "Hello, world!")
 
         try await host.asyncShutdown()
     }
@@ -312,7 +319,7 @@ struct LibP2PWebSocketTests {
             to: hostAddress,
             forProtocol: "/echo/1.0.0",
             withRequest: Data(echoMessage.utf8)
-        ).get()
+        )
 
         let str = try #require(String(data: Data(response), encoding: .utf8))
         #expect(str == echoMessage)
@@ -347,7 +354,7 @@ struct LibP2PWebSocketTests {
             """
         let peerID = try PeerID(fromJSON: str.data(using: .utf8)!)
 
-        let host = try await Application.make(.testing, peerID: peerID)
+        let host = try await Application.make(.testing, peerID: .existing(peerID))
         host.servers.use(.ws(host: "192.168.1.3", port: 10000))
         host.security.use(.noise)
         host.muxers.use(.mplex)
