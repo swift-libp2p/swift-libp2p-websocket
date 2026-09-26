@@ -215,9 +215,7 @@ public struct WebSocket: Transport {
     //    }
 
     public enum Errors: Error {
-        case notYetImplemeted
         case invalidMultiaddr
-        case failedToGenerateWSMaskingKey
         /// The remote closed the channel, or rejected the HTTP -> WebSocket upgrade, before the connection was established.
         case upgradeFailed
         /// The HTTP -> WebSocket upgrade didn't complete within ``WebSocket/defaultUpgradeTimeout``.
