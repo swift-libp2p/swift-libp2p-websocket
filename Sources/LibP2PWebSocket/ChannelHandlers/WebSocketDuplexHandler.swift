@@ -34,6 +34,9 @@ internal final class WebSocketDuplexHandler: ChannelDuplexHandler {
     let mode: LibP2P.Mode
     private var logger: Logger
 
+    /// Set once we've sent a `.connectionClose` frame, so we never send a second one
+    private var sentClose: Bool = false
+
     internal init(mode: LibP2P.Mode, logger: Logger) {
         self.logger = logger  //Logger(label: "Transport:WS[\(logger)]:DuplexHandler")
         self.mode = mode
@@ -106,9 +109,27 @@ internal final class WebSocketDuplexHandler: ChannelDuplexHandler {
     }
 
     private func receivedClose(context: ChannelHandlerContext, frame: WebSocketFrame) {
-        // Handle a received close frame. We're just going to close.
-        self.logger.trace("Received Close instruction from server")
-        context.close(promise: nil)
+        self.logger.trace("Received Close instruction from remote peer")
+        // Echo the status code back (RFC 6455 §5.5.1), then close the channel.
+        var payload = frame.unmaskedData
+        let code = payload.readWebSocketErrorCode() ?? .normalClosure
+        self.close(context: context, code: code)
+    }
+
+    /// Sends a `.connectionClose` frame (if we haven't already), then closes the channel once it has been written
+    private func close(context: ChannelHandlerContext, code: WebSocketErrorCode) {
+        guard !self.sentClose else {
+            context.close(promise: nil)
+            return
+        }
+        self.sentClose = true
+
+        var data = context.channel.allocator.buffer(capacity: 2)
+        data.write(webSocketErrorCode: code)
+        let frame = WebSocketFrame(fin: true, opcode: .connectionClose, maskKey: self.maskKey, data: data)
+        context.writeAndFlush(self.wrapOutboundOut(frame)).assumeIsolated().whenComplete { _ in
+            context.close(promise: nil)
+        }
     }
 
     public func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
