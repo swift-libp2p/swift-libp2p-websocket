@@ -22,6 +22,9 @@ import NIOWebSocket
 /// It handles converting WebSocketFrames into ByteBuffers to be passed along along the pipeline
 /// It also is responsible for handling various websocket frame opcodes (ex: .ping/.pong, .connectionClose, etc)
 /// It also masks data when in client / .initiator mode and handles unmasking data in host / .listener mode
+///
+/// - Note: Fragmented messages are reassembled by a `NIOWebSocketFrameAggregator` installed ahead of this handler,
+///   so we only ever see complete `.text` / `.binary` frames (plus interleaved control frames).
 internal final class WebSocketDuplexHandler: ChannelDuplexHandler {
     typealias InboundIn = WebSocketFrame
     typealias InboundOut = ByteBuffer
