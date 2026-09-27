@@ -562,7 +562,10 @@ private final class WSServerConnection: Sendable {
     }
 
     deinit {
-        assert(!self.channel.isActive, "WSServerConnection deinitialized without calling shutdown()")
+        // just make sure the listening socket can't outlive us
+        if self.channel.isActive {
+            self.channel.close(mode: .all, promise: nil)
+        }
     }
 
     public enum Errors: Error {
