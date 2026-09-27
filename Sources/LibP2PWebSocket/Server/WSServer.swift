@@ -472,15 +472,18 @@ private final class WSServerConnection: Sendable {
                     return logger
                 }()
 
+                let maxFrameSize = configuration.maxFrameSize
                 let upgrader = NIOWebSocketServerUpgrader(
+                    maxFrameSize: maxFrameSize,
                     shouldUpgrade: { (channel: Channel, head: HTTPRequestHead) in
                         channel.eventLoop.makeSucceededFuture(HTTPHeaders())
                     },
                     upgradePipelineHandler: { (channel: Channel, _: HTTPRequestHead) in
                         do {
-                            try channel.pipeline.syncOperations.addHandler(
-                                WebSocketDuplexHandler(mode: .listener, logger: logger),
-                                position: .last
+                            try channel.pipeline.syncOperations.addWebSocketDuplexHandlers(
+                                mode: .listener,
+                                maxFrameSize: maxFrameSize,
+                                logger: logger
                             )
                         } catch {
                             return channel.eventLoop.makeFailedFuture(error)
@@ -515,16 +518,12 @@ private final class WSServerConnection: Sendable {
                 return channel.eventLoop.makeSucceededVoidFuture()
             }
 
-            // Enable TCP_NODELAY and SO_REUSEADDR for the accepted Channels
+            // Enable TCP_NODELAY for the accepted Channels.
             .childChannelOption(
-                ChannelOptions.socket(IPPROTO_TCP, TCP_NODELAY),
-                value: configuration.tcpNoDelay ? SocketOptionValue(1) : SocketOptionValue(0)
+                ChannelOptions.tcpOption(.tcp_nodelay),
+                value: configuration.tcpNoDelay ? 1 : 0
             )
-            .childChannelOption(
-                ChannelOptions.socket(SocketOptionLevel(SOL_SOCKET), SO_REUSEADDR),
-                value: configuration.reuseAddress ? SocketOptionValue(1) : SocketOptionValue(0)
-            )
-            .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 1)
+            .childChannelOption(ChannelOptions.maxMessagesPerRead, value: configuration.maxMessagesPerRead)
 
         let channel: EventLoopFuture<Channel>
         switch configuration.address {
