@@ -41,7 +41,10 @@ struct LibP2PWebSocketTests {
     /// Checks that `address` is a loopback `/ws` address bound to a concrete port
     private func expectBoundLoopbackWS(_ address: Multiaddr?, sourceLocation: SourceLocation = #_sourceLocation) {
         guard let address, let tcp = address.tcpAddress else {
-            Issue.record("Expected a bound listen address, got \(String(describing: address))", sourceLocation: sourceLocation)
+            Issue.record(
+                "Expected a bound listen address, got \(String(describing: address))",
+                sourceLocation: sourceLocation
+            )
             return
         }
         #expect(tcp.address == "127.0.0.1", sourceLocation: sourceLocation)
