@@ -30,7 +30,7 @@ let package = Package(
     ...
     dependencies: [
         ...
-        .package(url: "https://github.com/swift-libp2p/swift-libp2p-websocket.git", .upToNextMinor(from: "0.2.0"))
+        .package(url: "https://github.com/swift-libp2p/swift-libp2p-websocket.git", .upToNextMinor(from: "0.3.0"))
     ],
         ...
         .target(
@@ -51,7 +51,7 @@ let package = Package(
 import LibP2PWebSocket
 
 /// Tell libp2p that it should listen for WS connections on the following ip:port...
-app.servers.use( .ws(host: "127.0.0.1", port: 10000) )
+app.servers.use( .ws(host: "127.0.0.1", port: 0) )
 /// Tell libp2p that it can dial peers using WebSockets `ws`
 app.transports.use( .ws )
 
@@ -73,5 +73,5 @@ Let's make this code better together! 🤝
 
 ## License
 
-[MIT](LICENSE) © 2022 Breth Inc.
+[MIT](LICENSE) © 2026 Breth Inc.
 
