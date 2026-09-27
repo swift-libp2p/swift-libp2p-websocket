@@ -2,7 +2,7 @@
 //
 // This source file is part of the swift-libp2p open source project
 //
-// Copyright (c) 2022-2025 swift-libp2p project authors
+// Copyright (c) 2022-2026 swift-libp2p project authors
 // Licensed under MIT
 //
 // See LICENSE for license information
@@ -12,9 +12,14 @@
 //
 //===----------------------------------------------------------------------===//
 
+import Foundation
 import LibP2P
+import Logging
+import Multiaddr
 import NIOConcurrencyHelpers
+import NIOCore
 import NIOHTTP1
+import NIOPosix
 import NIOWebSocket
 
 // Install our WS Tranport on the LibP2P Application
@@ -42,23 +47,36 @@ public struct WebSocket: Transport {
         self.uuid = uuid
     }
 
+    /// How long a dial may spend in `connect` before we give up.
+    public static let defaultConnectTimeout: TimeAmount = .seconds(10)
+
+    /// How long the HTTP -> WebSocket upgrade may take once the socket is connected.
+    public static let defaultUpgradeTimeout: TimeAmount = .seconds(10)
+
+    /// The largest WebSocket frame (and reassembled message) we'll accept.
+    ///
+    /// NIO's upgraders default to 16 KiB, which is smaller than a single max-size Noise frame (64 KiB).
+    public static let defaultMaxFrameSize: Int = 1 << 20
+
     public var sharedClient: ClientBootstrap {
         let lock = self.application.locks.lock(for: Key.self)
         lock.lock()
         defer { lock.unlock() }
         if let existing = self.application.storage[Key.self] {
-            return existing
+            return existing.bootstrap
         }
         let new = ClientBootstrap(group: self.application.eventLoopGroup)
             // Enable SO_REUSEADDR.
             .channelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
+            // Match the accept side, which sets TCP_NODELAY on every child channel.
+            .channelOption(ChannelOptions.tcpOption(.tcp_nodelay), value: 1)
+            .channelOption(ChannelOptions.connectTimeout, value: Self.defaultConnectTimeout)
             .channelInitializer { channel in
-                // Do we install the upgrader here or do we let the Connection install the handlers???
-                //channel.pipeline.addHandlers(upgrader.channelHandlers(mode: .initiator)) // The MSS Handler itself needs to have access to the Connection Delegate
+                // The HTTP / WebSocket upgrade handlers are installed per dial (see `dial(address:)`)
                 channel.eventLoop.makeSucceededVoidFuture()
             }
 
-        self.application.storage.set(Key.self, to: new)
+        self.application.storage.set(Key.self, to: SharedDialBootstrap(new))
 
         return new
     }
@@ -91,32 +109,47 @@ public struct WebSocket: Transport {
 
     /// For each new Dial, we connect to the desired multiaddr, then install our handlers
     /// 1) Http 1.1 initial request handler (with client upgrader config)
-    /// 2) WebSocket Handler
-    /// 3) We then let the connection proceed to initialize itself on the channel / pipeline
+    /// 2) Once the upgrade completes, the WebSocket Handler
+    /// 3) We then hand the upgraded channel to the ConnectionManager (`adoptOutbound`), which registers the
+    ///    connection, installs the quiesce / backpressure handlers, and kicks off the security + muxer upgrade.
+    ///
+    /// The returned future only succeeds once the WebSocket upgrade has completed and the connection has been adopted.
+    /// A failed upgrade, early close, or a timeout fails the dial.
     public func dial(address: Multiaddr) -> EventLoopFuture<Connection> {
         guard let tcp = address.tcpAddress else {
             self.application.logger.warning("Invalid Mutliaddr. WS can't dial \(address)")
             return self.application.eventLoopGroup.any().makeFailedFuture(Errors.invalidMultiaddr)
         }
-        //guard let requestKey = try? LibP2PCrypto.randomBytes(length: 16).asString(base: .base64Pad) else {
-        //    return self.application.eventLoopGroup.any().makeFailedFuture(Errors.failedToGenerateWSMaskingKey)
-        //}
+
+        let application = self.application
+        application.logger.trace("Attempting to dial \(address)")
 
         return sharedClient.connect(host: tcp.address, port: tcp.port).flatMap {
             channel -> EventLoopFuture<Connection> in
 
-            self.application.logger.trace("Instantiating new Connection")
-            let conn = application.connectionManager.generateConnection(
-                channel: channel,
-                direction: .outbound,
-                remoteAddress: address,
-                expectedRemotePeer: try? address.getPeerID()
-            )
+            let logger: Logger = {
+                var logger = application.logger
+                logger[metadataKey: "WS"] = .string("\(address)")
+                return logger
+            }()
 
-            /// The connection installs the necessary channel handlers here
-            //self.application.logger.trace("Asking BasicConnectionLight to instantiate new outbound channel")
+            // Completed once the upgraded channel has been adopted by the ConnectionManager
+            let adopted = channel.eventLoop.makePromise(of: Connection.self)
 
-            let httpHandler = HTTPInitialRequestHandler(target: address, logger: conn.logger)
+            // Fail the dial if the upgrade doesn't complete in time.
+            let upgradeTimeout = channel.eventLoop.scheduleTask(in: Self.defaultUpgradeTimeout) {
+                adopted.fail(Errors.upgradeTimedOut)
+                channel.close(mode: .all, promise: nil)
+            }
+            // Fail the dial if the channel closes before the upgrade / adoption completes.
+            // Failing an already completed promise is a no-op.
+            channel.closeFuture.whenComplete { _ in
+                adopted.fail(Errors.upgradeFailed)
+            }
+            // Cancel the upgrade timeout if we're adopted
+            adopted.futureResult.whenComplete { _ in upgradeTimeout.cancel() }
+
+            let httpHandler = HTTPInitialRequestHandler(target: address, logger: logger)
 
             /// - Note: The default requestKey NIO generates seems to work now!
             /// swift-nio recommends 28 char requestKey, Go supports 28 char keys
@@ -124,49 +157,52 @@ public struct WebSocket: Transport {
             /// requestKey: "dGhlIHNhbXBsZSBub25jZQ==",
             /// requestKey: "OfS0wDaT5NoxF2gqm7Zj2YtetzM=",
             let websocketUpgrader = NIOWebSocketClientUpgrader(
-                //requestKey: requestKey,
-                upgradePipelineHandler: { (channel: Channel, head: HTTPResponseHead) in
-                    print(head)
-                    let wsh = WebSocketDuplexHandler(mode: .initiator, logger: conn.logger)
-                    return channel.pipeline.addHandler(BackPressureHandler(), position: .first).flatMap {
-                        channel.pipeline.addHandler(wsh, position: .last).flatMap {
-                            /// Add the connection to our connectionManager
-                            //return self.application.connections.addConnection(conn, on: nil).flatMap {
-                            /// Tell our connection to initialize the channel
-                            conn.initializeChannel().map {
-                                wsh.fireChannelActiveIfNecessary()
-                            }
-                            //}
-                        }
+                maxFrameSize: Self.defaultMaxFrameSize,
+                upgradePipelineHandler: { (channel: Channel, _: HTTPResponseHead) in
+                    do {
+                        try channel.pipeline.syncOperations.addWebSocketDuplexHandlers(
+                            mode: .initiator,
+                            maxFrameSize: Self.defaultMaxFrameSize,
+                            logger: logger
+                        )
+                    } catch {
+                        adopted.fail(error)
+                        return channel.eventLoop.makeFailedFuture(error)
                     }
+                    /// Hand the upgraded channel to the ConnectionManager.
+                    /// Outbound dials are gated pre-dial, so admission goes straight to the manager.
+                    let adoption = application.connectionManager.adoptOutbound(
+                        channel: channel,
+                        remoteAddress: address
+                    ).map { $0 as Connection }
+                    adopted.completeWith(adoption)
+                    return adoption.map { _ in }
                 }
             )
 
             /// Create the Upgrader Configuration
             let config: NIOHTTPClientUpgradeConfiguration = (
                 upgraders: [websocketUpgrader],
-                completionHandler: { _ in
-                    channel.pipeline.removeHandler(httpHandler, promise: nil)
+                completionHandler: { context in
+                    context.pipeline.syncOperations.removeHandler(httpHandler, promise: nil)
                 }
             )
 
-            /// Instantiate the connection with the http handlers and the WS upgrader
-            /// /// Add the connection to our connectionManager
-            return channel.pipeline.addHTTPClientHandlers(withClientUpgrade: config).flatMap {
-                channel.pipeline.addHandler(httpHandler).flatMap {
-                    self.application.connections.addConnection(conn, on: nil).flatMap {
-                        // We normally call Connection.initializeChannel() here, but we wait to call this until the WebSocket upgrade is completed (above)...
-                        channel.eventLoop.makeSucceededFuture(conn)
-                    }
-                }
+            /// Install the http handlers and the WS upgrader, then wait for the upgrade + adoption to complete
+            do {
+                try channel.pipeline.syncOperations.addHTTPClientHandlers(withClientUpgrade: config)
+                try channel.pipeline.syncOperations.addHandler(httpHandler)
+            } catch {
+                adopted.fail(error)
+                channel.close(mode: .all, promise: nil)
             }
+
+            return adopted.futureResult
         }
     }
 
     /// Parses the Multiaddr and determines if it's a valid WebSocket endpoint that can be dialed
     public func canDial(address: Multiaddr) -> Bool {
-        //address.tcpAddress != nil && !address.protocols().contains(.ws)
-        print("WS Can Dial -> \(address)")
         guard let tcp = address.tcpAddress else { return false }
         // Remove once we can dial ipv6 addresses
         guard tcp.ip4 else { return false }
@@ -175,12 +211,8 @@ public struct WebSocket: Transport {
         return true
     }
 
-    public func listen(address: Multiaddr) -> EventLoopFuture<Listener> {
-        application.eventLoopGroup.any().makeFailedFuture(Errors.notYetImplemeted)
-    }
-
     struct Key: StorageKey, LockKey {
-        typealias Value = ClientBootstrap
+        typealias Value = SharedDialBootstrap
     }
 
     //    struct ConfigurationKey: StorageKey {
@@ -188,9 +220,21 @@ public struct WebSocket: Transport {
     //    }
 
     public enum Errors: Error {
-        case notYetImplemeted
         case invalidMultiaddr
-        case failedToGenerateWSMaskingKey
+        /// The remote closed the channel, or rejected the HTTP -> WebSocket upgrade, before the connection was established.
+        case upgradeFailed
+        /// The HTTP -> WebSocket upgrade didn't complete within ``WebSocket/defaultUpgradeTimeout``.
+        case upgradeTimedOut
+    }
+}
+
+/// Holds the shared dial bootstrap so it can live in `Application.storage` without
+/// retroactively conforming NIO's `ClientBootstrap`.
+final class SharedDialBootstrap: @unchecked Sendable {
+    let bootstrap: ClientBootstrap
+
+    init(_ bootstrap: ClientBootstrap) {
+        self.bootstrap = bootstrap
     }
 }
 
@@ -210,16 +254,4 @@ extension Application.Transports.Provider {
     //            }
     //        }
     //    }
-}
-
-extension WebSocketMaskingKey {
-    static var random4ByteKey: Self {
-        .init(
-            arrayLiteral:
-                UInt8.random(in: UInt8.min...UInt8.max),
-            UInt8.random(in: UInt8.min...UInt8.max),
-            UInt8.random(in: UInt8.min...UInt8.max),
-            UInt8.random(in: UInt8.min...UInt8.max)
-        )
-    }
 }
