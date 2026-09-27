@@ -38,9 +38,20 @@ struct LibP2PWebSocketTests {
         try report.throwIfFailed()
     }
 
+    /// Checks that `address` is a loopback `/ws` address bound to a concrete port
+    private func expectBoundLoopbackWS(_ address: Multiaddr?, sourceLocation: SourceLocation = #_sourceLocation) {
+        guard let address, let tcp = address.tcpAddress else {
+            Issue.record("Expected a bound listen address, got \(String(describing: address))", sourceLocation: sourceLocation)
+            return
+        }
+        #expect(tcp.address == "127.0.0.1", sourceLocation: sourceLocation)
+        #expect(tcp.port != 0, sourceLocation: sourceLocation)
+        #expect(address.protocols().contains(.ws), sourceLocation: sourceLocation)
+    }
+
     @Test func testInternalWebSocketStartThenStop() async throws {
         let host = try await Application.make(.testing)
-        host.servers.use(.ws(host: "127.0.0.1", port: 10000))
+        host.servers.use(.ws(host: "127.0.0.1", port: 0))
         host.security.use(.noise)
         host.muxers.use(.mplex)
 
@@ -48,20 +59,20 @@ struct LibP2PWebSocketTests {
 
         print(host.listenAddresses)
 
-        #expect(try host.listenAddresses.first == Multiaddr("/ip4/127.0.0.1/tcp/10000/ws"))
+        expectBoundLoopbackWS(host.listenAddresses.first)
 
         try await host.asyncShutdown()
     }
 
     @Test func testInternalWebSocketEcho() async throws {
         let host = try await Application.make(.testing, peerID: .ephemeral())
-        host.servers.use(.ws(host: "127.0.0.1", port: 10000))
+        host.servers.use(.ws(host: "127.0.0.1", port: 0))
         host.security.use(.noise)
         host.muxers.use(.mplex)
         host.logger.logLevel = .trace
 
         let client = try await Application.make(.testing, peerID: .ephemeral())
-        client.servers.use(.ws(host: "127.0.0.1", port: 10001))
+        client.servers.use(.ws(host: "127.0.0.1", port: 0))
         client.security.use(.noise)
         client.muxers.use(.mplex)
         client.transports.use(.ws)
@@ -78,15 +89,14 @@ struct LibP2PWebSocketTests {
         try await host.startup()
         try await client.startup()
 
-        let hostAddress = host.listenAddresses.first
+        expectBoundLoopbackWS(host.listenAddresses.first)
+        expectBoundLoopbackWS(client.listenAddresses.first)
 
-        #expect(hostAddress != nil)
-        #expect(try hostAddress == Multiaddr("/ip4/127.0.0.1/tcp/10000/ws"))
-        #expect(try client.listenAddresses.first == Multiaddr("/ip4/127.0.0.1/tcp/10001/ws"))
+        let hostAddress = try host.dialableAddress
 
         let echoMessage = "Hello from swift libp2p!"
         let response = try await client.newRequest(
-            to: hostAddress!,
+            to: hostAddress,
             forProtocol: "/echo/1.0.0",
             withRequest: Data(echoMessage.utf8),
             withHandlers: .handlers([.newLineDelimited]),
@@ -131,10 +141,6 @@ struct LibP2PWebSocketTests {
 
     @Test(.externalIntegrationTestsEnabled)
     func testExternalSwiftHostSameLAN() async throws {
-        guard let b = ProcessInfo.processInfo.environment["PerformIntegrationTests"], b == "true" else {
-            print("Skipping Integration Test")
-            return
-        }
         let client = try await Application.make(.testing, peerID: .ephemeral())
         client.servers.use(.ws(host: "0.0.0.0", port: 10000))
         client.security.use(.noise)
