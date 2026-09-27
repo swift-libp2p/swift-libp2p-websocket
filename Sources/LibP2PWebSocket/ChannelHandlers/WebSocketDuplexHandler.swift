@@ -74,28 +74,35 @@ internal final class WebSocketDuplexHandler: ChannelDuplexHandler {
 
         switch frame.opcode {
         case .text, .binary:
-            //Pass the received data along the pipeline
-            let data = frame.unmaskedData
-            //print("Websocket: Received \(text)")
-            context.fireChannelRead(self.wrapInboundOut(data))
+            // Pass the received data along the pipeline
+            context.fireChannelRead(self.wrapInboundOut(frame.unmaskedData))
+
+        case .ping:
+            // Every ping must be answered with a pong echoing its payload (RFC 6455 §5.5.2)
+            self.pong(context: context, frame: frame)
+
+        case .pong:
+            // Unsolicited pongs are allowed and require no response
+            break
 
         case .connectionClose:
             self.receivedClose(context: context, frame: frame)
 
-        //        case .ping:
-        //            let frame = WebSocketFrame(fin: true, opcode: .ping, maskKey: mode == .initiator ? WebSocketMaskingKey(randomKeyLength: 4) : nil, data: context.channel.allocator.buffer(bytes: []))
-        //            context.write(self.wrapOutboundOut(frame), promise: nil)
-
-        case .continuation, .ping, .pong:
-            // We ignore these frames.
-            self.logger.warning("Frame Opcode: \(frame.opcode)")
-            break
+        case .continuation:
+            // Shouldn't happen, the frame aggregator reassembles fragmented messages for us
+            self.logger.warning("Unexpected continuation frame received")
 
         default:
-            // Unknown frames are errors.
-            //self.closeOnError(context: context)
-            self.logger.warning("Unknown Frame Opcode Receieved: \(frame.opcode):\(frame)")
+            // Unknown opcodes are protocol errors (RFC 6455 §5.2)
+            self.logger.warning("Unknown Frame Opcode Received: \(frame.opcode)")
+            self.close(context: context, code: .protocolError)
         }
+    }
+
+    private func pong(context: ChannelHandlerContext, frame: WebSocketFrame) {
+        guard !self.sentClose else { return }
+        let pong = WebSocketFrame(fin: true, opcode: .pong, maskKey: self.maskKey, data: frame.unmaskedData)
+        context.writeAndFlush(self.wrapOutboundOut(pong), promise: nil)
     }
 
     private func receivedClose(context: ChannelHandlerContext, frame: WebSocketFrame) {
