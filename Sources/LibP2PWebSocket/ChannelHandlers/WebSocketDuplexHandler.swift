@@ -28,9 +28,6 @@ internal final class WebSocketDuplexHandler: ChannelDuplexHandler {
     typealias OutboundIn = ByteBuffer
     typealias OutboundOut = WebSocketFrame
 
-    var didFireChannelActive: Bool = false
-    weak var _context: ChannelHandlerContext? = nil
-
     let mode: LibP2P.Mode
     private var logger: Logger
 
@@ -38,42 +35,26 @@ internal final class WebSocketDuplexHandler: ChannelDuplexHandler {
     private var sentClose: Bool = false
 
     internal init(mode: LibP2P.Mode, logger: Logger) {
-        self.logger = logger  //Logger(label: "Transport:WS[\(logger)]:DuplexHandler")
+        self.logger = logger
         self.mode = mode
         self.logger[metadataKey: "WS"] = .string("DuplexHandler")
     }
 
-    // This is being hit, channel active won't be called as it is already added.
     public func handlerAdded(context: ChannelHandlerContext) {
         self.logger.trace("WebSocket handler added.")
-        _context = context
-        //self.pingTestFrameData(context: context)
     }
 
     public func handlerRemoved(context: ChannelHandlerContext) {
         self.logger.trace("WebSocket handler removed.")
     }
 
-    internal func fireChannelActiveIfNecessary() {
-        guard didFireChannelActive == false else { return }
-        //_context?.fireChannelActive()
-        _context = nil
-        didFireChannelActive = true
+    /// The initiator (client) must mask every frame it sends, the listener (server) must not (RFC 6455 §5.1)
+    private var maskKey: WebSocketMaskingKey? {
+        self.mode == .initiator ? .random() : nil
     }
 
     public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let frame = self.unwrapInboundIn(data)
-
-        //        print("WebSocketHandler:channelRead \(frame)")
-        //        print("Fin: \(frame.fin)")
-        //        print("Opcode: \(frame.opcode)")
-        //        print("Maks Key: \(frame.maskKey)")
-
-        if didFireChannelActive == false {
-            //context.fireChannelActive()
-            didFireChannelActive = true
-            _context = nil
-        }
 
         switch frame.opcode {
         case .text, .binary:
