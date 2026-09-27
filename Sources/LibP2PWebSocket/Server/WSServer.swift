@@ -378,14 +378,49 @@ public final class WSServer: Server, @unchecked Sendable {
         self.state.withLockedValue { $0.connection }?.channel.localAddress
     }
 
-    /// TODO: FIXME!
     public var listeningAddress: Multiaddr {
         // Prefer the live socket address when available (the connection is released on shutdown)
-        guard let live = self.localAddress else {
-            return try! Multiaddr("/ip4/\(self.configuration.hostname)/tcp/\(self.configuration.port)/ws")
+        if let live = self.localAddress, let ma = try? live.toMultiaddr().encapsulate(proto: .ws, address: nil) {
+            return ma
         }
-        return try! live.toMultiaddr().encapsulate(proto: .ws, address: nil)
+        // Not bound yet, or already shut down, fall back to what we were configured with.
+        if let configured = Self.multiaddr(for: self.configuration.address) {
+            return configured
+        }
+        self.configuration.logger.warning(
+            "Unable to derive a listening multiaddr from \(self.configuration.address); reporting an unspecified address"
+        )
+        return Self.unspecifiedAddress
     }
+
+    /// Builds a `/ws` multiaddr from a bind address
+    ///
+    /// Picks the codec matching the literal form of the host, because `Multiaddr` rejects an `.ip4`
+    /// component that isn't a dotted quad (ex: `hostname: "localhost"`).
+    private static func multiaddr(for address: BindAddress) -> Multiaddr? {
+        switch address {
+        case .unixDomainSocket(let path):
+            return try? Multiaddr(.unix, address: path).encapsulate(proto: .ws, address: nil)
+
+        case .hostname(let host, let port):
+            let hostname = host ?? Configuration.defaultHostname
+            let port = port ?? Configuration.defaultPort
+
+            // Let NIO classify the host rather than hand-rolling address parsing.
+            let codec: MultiaddrProtocol
+            switch try? SocketAddress(ipAddress: hostname, port: port) {
+            case .some(let parsed) where parsed.protocol == .inet: codec = .ip4
+            case .some(let parsed) where parsed.protocol == .inet6: codec = .ip6
+            default: codec = .dns
+            }
+
+            guard let base = try? Multiaddr(codec, address: hostname) else { return nil }
+            return try? base.encapsulate(proto: .tcp, address: "\(port)").encapsulate(proto: .ws, address: nil)
+        }
+    }
+
+    /// Last-resort answer for the non-optional ``Server/listeningAddress`` requirement.
+    private static let unspecifiedAddress: Multiaddr = try! Multiaddr("/ip4/0.0.0.0/tcp/0/ws")
 
     deinit {
         let (didStart, didShutdown) = self.state.withLockedValue { ($0.didStart, $0.didShutdown) }
