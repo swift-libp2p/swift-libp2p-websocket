@@ -201,7 +201,8 @@ public final class WSServer: Server, @unchecked Sendable {
 
     public var onShutdown: EventLoopFuture<Void> {
         guard let connection = self.state.withLockedValue({ $0.connection }) else {
-            fatalError("Server has not started yet")
+            // Not started yet, or already shut down
+            return self.eventLoopGroup.any().makeSucceededVoidFuture()
         }
         return connection.channel.closeFuture
     }
