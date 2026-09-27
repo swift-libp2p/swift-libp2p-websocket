@@ -548,10 +548,11 @@ private final class WSServerConnection: Sendable {
 
     func close(timeout: TimeAmount) -> EventLoopFuture<Void> {
         let promise = self.channel.eventLoop.makePromise(of: Void.self)
-        self.channel.eventLoop.scheduleTask(in: timeout) {
-            //promise.fail(Abort(.internalServerError, reason: "Server stop took too long."))
+        let timeoutTask = self.channel.eventLoop.scheduleTask(in: timeout) {
             promise.fail(Errors.serverStopTookTooLong)
         }
+        // Cancel the timeout as soon as the quiesce completes.
+        promise.futureResult.whenComplete { _ in timeoutTask.cancel() }
         self.quiesce.initiateShutdown(promise: promise)
         return promise.futureResult
     }
