@@ -2,7 +2,7 @@
 //
 // This source file is part of the swift-libp2p open source project
 //
-// Copyright (c) 2022-2025 swift-libp2p project authors
+// Copyright (c) 2022-2026 swift-libp2p project authors
 // Licensed under MIT
 //
 // See LICENSE for license information
@@ -13,6 +13,8 @@
 //===----------------------------------------------------------------------===//
 
 import LibP2P
+import Logging
+import NIOCore
 import NIOWebSocket
 
 /// The web socket handler to be used once the upgrade has occurred.
@@ -103,42 +105,42 @@ internal final class WebSocketDuplexHandler: ChannelDuplexHandler {
     }
 
     public func write(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
-        self.logger.trace("Wrapping Outbound write in WebSocketFrame")
-        self.logger.trace("Context: IsActive: \(context.channel.isActive), IsWritable: \(context.channel.isWritable)")
-        let data = self.unwrapOutboundIn(data)
-        //data.write(webSocketErrorCode: .protocolError)
-        let frame = WebSocketFrame(
-            fin: true,
-            opcode: .binary,
-            maskKey: mode == .initiator ? WebSocketMaskingKey.random4ByteKey : nil,
-            data: data
-        )
-        //let frame = WebSocketFrame(fin: true, opcode: .binary, maskKey: nil, data: data)
-        context.write(self.wrapOutboundOut(frame), promise: nil)
+        var data = self.unwrapOutboundIn(data)
+
+        // libp2p treats a WebSocket as a byte stream, message boundaries carry no meaning. So we split
+        // large writes into multiple frames to stay well under the remote's max frame size.
+        while data.readableBytes > Self.maxOutboundFrameSize,
+            let chunk = data.readSlice(length: Self.maxOutboundFrameSize)
+        {
+            context.write(self.wrapOutboundOut(self.binaryFrame(chunk)), promise: nil)
+        }
+
+        // Forward the promise, upstream handlers rely on it to learn when their write has completed.
+        // Writes complete in order, so the final frame completing implies the earlier ones did too.
+        context.write(self.wrapOutboundOut(self.binaryFrame(data)), promise: promise)
     }
 
-    public func writeAndFlush(context: ChannelHandlerContext, data: NIOAny, promise: EventLoopPromise<Void>?) {
-        self.logger.trace("Wrapping Outbound writeAndFlush in WebSocketFrame")
+    /// The largest frame we'll send, chosen to match the largest Noise frame (64 KiB)
+    static let maxOutboundFrameSize: Int = 1 << 16
 
-        let data = self.unwrapOutboundIn(data)
-        //data.write(webSocketErrorCode: .protocolError)
-        let frame = WebSocketFrame(
-            fin: true,
-            opcode: .binary,
-            maskKey: mode == .initiator ? WebSocketMaskingKey.random4ByteKey : nil,
-            data: data
-        )
-        //let frame = WebSocketFrame(fin: true, opcode: .binary, maskKey: nil, data: data)
-        context.writeAndFlush(self.wrapOutboundOut(frame), promise: nil)
+    private func binaryFrame(_ data: ByteBuffer) -> WebSocketFrame {
+        WebSocketFrame(fin: true, opcode: .binary, maskKey: self.maskKey, data: data)
     }
+}
 
-    //    public func flush(context: ChannelHandlerContext) {
-    //        context.flush()
-    //    }
-
-    // Flush it out. This can make use of gathering writes if multiple buffers are pending
-    //    public func channelWriteComplete(context: ChannelHandlerContext) {
-    //        print("MSS:Write Complete")
-    //        context.flush()
-    //    }
+extension ChannelPipeline.SynchronousOperations {
+    /// Installs the handlers needed once the HTTP -> WebSocket upgrade completes.
+    /// 1) A frame aggregator that reassembles fragmented messages
+    /// 2) Our duplex handler which converts between WebSocketFrames and ByteBuffers
+    func addWebSocketDuplexHandlers(mode: LibP2P.Mode, maxFrameSize: Int, logger: Logger) throws {
+        try self.addHandlers(
+            NIOWebSocketFrameAggregator(
+                minNonFinalFragmentSize: 0,
+                maxAccumulatedFrameCount: .max,
+                maxAccumulatedFrameSize: maxFrameSize
+            ),
+            WebSocketDuplexHandler(mode: mode, logger: logger),
+            position: .last
+        )
+    }
 }
