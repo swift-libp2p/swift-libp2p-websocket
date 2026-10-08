@@ -28,14 +28,22 @@ let package = Package(
             targets: ["LibP2PWebSocket"]
         )
     ],
+    traits: [
+        // Not enabled by default, so consumers of this package never build / link the test only dependencies.
+        // Enable it to run the live networking tests: `swift test --traits TestDependencies`
+        .trait(
+            name: "TestDependencies",
+            description: "Enables the live networking tests, which depend on swift-libp2p-noise and swift-libp2p-yamux"
+        )
+    ],
     dependencies: [
         // Dependencies declare other packages that this package depends on.
         .package(url: "https://github.com/swift-libp2p/swift-libp2p.git", .upToNextMinor(from: "0.4.0")),
         .package(url: "https://github.com/apple/swift-nio.git", .upToNextMajor(from: "2.87.0")),
 
-        // Testing
+        // Test dependencies (only used when the `TestDependencies` trait is enabled)
         .package(url: "https://github.com/swift-libp2p/swift-libp2p-noise", .upToNextMinor(from: "0.4.0")),
-        .package(url: "https://github.com/swift-libp2p/swift-libp2p-mplex", .upToNextMinor(from: "0.4.0")),
+        .package(url: "https://github.com/swift-libp2p/swift-libp2p-yamux", .upToNextMinor(from: "0.4.0")),
     ],
     targets: [
         // Targets are the basic building blocks of a package. A target can define a module or a test suite.
@@ -57,8 +65,16 @@ let package = Package(
                 "LibP2PWebSocket",
                 .product(name: "LibP2PTesting", package: "swift-libp2p"),
                 .product(name: "NIOEmbedded", package: "swift-nio"),
-                .product(name: "LibP2PNoise", package: "swift-libp2p-noise"),
-                .product(name: "LibP2PMPLEX", package: "swift-libp2p-mplex"),
+                .product(
+                    name: "LibP2PNoise",
+                    package: "swift-libp2p-noise",
+                    condition: .when(traits: ["TestDependencies"])
+                ),
+                .product(
+                    name: "LibP2PYAMUX",
+                    package: "swift-libp2p-yamux",
+                    condition: .when(traits: ["TestDependencies"])
+                ),
             ]
         ),
     ]
